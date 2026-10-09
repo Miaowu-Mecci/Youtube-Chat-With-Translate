@@ -1,0 +1,17 @@
+{
+  "source": "https://www.youtube.com/watch?v=VIDEO_ID",
+  "source_type": "auto",
+  "youtube_key": "",
+  "translation_enabled": false,
+  "azure_key": "",
+  "azure_region": "eastasia",
+  "target_language": "zh-Hans",
+  "style": {
+    "font_size": 24,
+    "color": "#ffffff",
+    "translation_color": "#8de1cb",
+    "show_avatar": true,
+    "max_messages": 100,
+    "custom_css": ""
+  }
+}

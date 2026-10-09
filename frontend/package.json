@@ -1,0 +1,20 @@
+{
+  "name": "youtube-obs-bilingual-chat",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "test": "playwright test"
+  },
+  "dependencies": {
+    "lodash": "4.18.1",
+    "vue": "2.7.16"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.58.2",
+    "@vitejs/plugin-vue2": "2.3.4",
+    "vite": "6.4.4"
+  }
+}
