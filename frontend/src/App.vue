@@ -39,6 +39,7 @@
             <p class="small">测试会向选定服务发送固定外语样例，不需要连接 YouTube。测试翻译不受弹幕翻译开关控制。</p>
             <p class="connection-message" role="status" aria-label="翻译测试结果" v-if="testResult">{{ testResult }}</p>
             <p class="connection-message">{{ status.translation_message }}</p>
+            <p v-if="status.translation_counts" class="small" aria-label="翻译进度">当前保留弹幕：等待 {{ status.translation_counts.pending }} · 已完成 {{ status.translation_counts.complete }} · 失败 {{ status.translation_counts.failed }} · 跳过 {{ status.translation_counts.skipped }}。Google 每秒最多处理约一条；恢复翻译会重新处理未完成消息。</p>
             <p class="small" v-if="languageNotice">{{ languageNotice }}</p>
           </section>
 

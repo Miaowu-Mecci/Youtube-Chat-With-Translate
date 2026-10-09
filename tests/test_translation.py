@@ -154,3 +154,38 @@ async def test_other_workers_cannot_overwrite_a_paused_quota_state():
         assert states[-1][0] == 'paused'
     finally:
         await pool.close()
+
+
+async def test_obsolete_queued_jobs_do_not_block_current_messages():
+    current, calls = {'old-1', 'old-2'}, []
+    class Provider:
+        async def translate(self, text, target):
+            calls.append(text)
+            return Result('译文 ' + text, 'en')
+    pool = TranslationPool(Provider(), 'ja', lambda *args: None, lambda *args: None, concurrency=1, capacity=2, is_current=lambda mid: mid in current)
+    pool.submit('old-1', 'old one')
+    pool.submit('old-2', 'old two')
+    current.clear()
+    current.add('new')
+    assert pool.submit('new', 'new message') == 'pending'
+    pool.start()
+    try:
+        await asyncio.wait_for(pool.queue.join(), 1)
+        assert calls == ['new message'] and not pool.pending
+    finally:
+        await pool.close()
+
+
+async def test_unexpected_worker_error_is_visible_and_does_not_silently_kill_worker():
+    states = []
+    class Provider:
+        async def translate(self, text, target): raise RuntimeError('PRIVATE')
+    pool = TranslationPool(Provider(), 'ja', lambda *args: None, lambda *args: states.append(args), concurrency=1)
+    pool.start()
+    try:
+        pool.submit('one', 'hello')
+        await asyncio.wait_for(pool.queue.join(), 1)
+        assert pool.paused and not pool.workers[0].done()
+        assert states[-1][0] == 'paused' and 'PRIVATE' not in str(states)
+    finally:
+        await pool.close()
