@@ -25,6 +25,8 @@ class ChatHub:
         self.mode = "idle"
         self.session = uuid4().hex
         self.lock = asyncio.Lock()
+        self.chat_started_at = None
+        self.ignored_history = 0
 
     def snapshot(self):
         return {"type": "snapshot", "session": self.session, "messages": copy.deepcopy(list(self.messages.values())),
@@ -36,7 +38,9 @@ class ChatHub:
             state = message.get("translation_status", "skipped")
             if state in counts:
                 counts[state] += 1
-        return {**self.status, "translation_counts": counts}
+        return {**self.status, "translation_counts": counts,
+                "chat_started_at": self.chat_started_at.isoformat() if self.chat_started_at else "",
+                "ignored_history": self.ignored_history}
 
     def publish_progress(self):
         self.publish({"type": "status", "status": self.current_status()})
@@ -184,7 +188,10 @@ class ChatHub:
             if message["translation_status"] == "pending":
                 self.translated(mid, None, "failed")
 
-    async def connect(self, demo: bool = False):
+    async def connect(self, demo: bool = False, started_at: datetime | None = None):
+        requested_at = datetime.now(timezone.utc)
+        if started_at is not None:
+            requested_at = min(requested_at, started_at.astimezone(timezone.utc))
         async with self.lock:
             # Multiple callers must not open multiple connections.
             if self.task and not self.task.done() and self.mode == ("demo" if demo else "live"):
@@ -193,6 +200,8 @@ class ChatHub:
             if self.google.paused:
                 self.google.resume()
             self.mode = "demo" if demo else "live"
+            self.chat_started_at = None if demo else requested_at
+            self.ignored_history = 0
             self.session = uuid4().hex
             self.messages.clear()
             self.seen.clear()
@@ -213,6 +222,8 @@ class ChatHub:
             if source_changed:
                 await self.stop()
                 self.mode = "idle"
+                self.chat_started_at = None
+                self.ignored_history = 0
                 self.session = uuid4().hex
                 self.messages.clear()
                 self.seen.clear()
@@ -278,6 +289,20 @@ class ChatHub:
         if not event:
             return False
         if event["type"] == "message":
+            if self.mode == "live" and self.chat_started_at is not None:
+                try:
+                    published = datetime.fromisoformat(event["message"]["time"].replace("Z", "+00:00"))
+                    if published.tzinfo is None:
+                        raise ValueError()
+                except (ValueError, TypeError, AttributeError):
+                    # An unknown timestamp cannot safely be classified as post-click.
+                    return False
+                if published < self.chat_started_at:
+                    mid = event["message"]["id"]
+                    if mid not in self.seen:
+                        self.ignored_history += 1
+                        self.remember(self.seen, mid)
+                    return False
             self.add(event["message"])
         elif event["type"] == "delete":
             self.delete(event["ids"])
@@ -306,6 +331,7 @@ class ChatHub:
                             if self.consume(item):
                                 ended = True
                                 break
+                        self.publish_progress()
                         if batch.offline or ended:
                             self.set_status("ended", "直播聊天已结束。", "chat_ended")
                             return

@@ -45,3 +45,18 @@ def test_websocket_snapshot_and_local_demo(tmp_path):
                 if event['type'] == 'message':
                     assert event['message']['original'] and event['session'] != initial['session']
                     break
+
+
+def test_connect_accepts_click_timestamp_and_rejects_unzoned_timestamp(tmp_path):
+    from datetime import datetime, timezone
+    from app.server import create_app
+    app = create_app(tmp_path / 'config.json')
+    with TestClient(app) as client:
+        timestamp = datetime.now(timezone.utc).isoformat()
+        result = client.post('/api/connect', json={'started_at': timestamp})
+        assert result.status_code == 200
+        assert result.json()['chat_started_at'] == timestamp
+        client.post('/api/disconnect')
+        assert client.post('/api/connect', json={'started_at': '2026-10-09T00:00:00'}).status_code == 422
+        assert client.post('/api/connect', json={'started_at': 'invalid'}).status_code == 422
+        assert client.post('/api/connect').status_code == 200
