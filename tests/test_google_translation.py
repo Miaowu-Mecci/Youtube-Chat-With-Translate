@@ -4,6 +4,8 @@ import time
 
 import httpx
 import pytest
+from curl_cffi import AsyncSession
+from curl_cffi.requests.exceptions import RequestException
 from fastapi.testclient import TestClient
 
 from app.config import Config, ConfigStore
@@ -147,7 +149,7 @@ def test_api_google_no_keys_languages_test_and_shared_cooldown(tmp_path, monkeyp
         calls.append(kwargs['params'])
         return httpx.Response(429)
     with TestClient(app) as client:
-        monkeypatch.setattr(app.state.client, 'get', respond)
+        monkeypatch.setattr(app.state.hub.google.client, 'get', respond)
         assert client.get('/api/config').json()['translation_provider'] == 'google_web'
         assert len(client.get('/api/languages').json()['languages']) == 8
         assert client.get('/api/languages?provider=invalid').status_code == 422
@@ -170,12 +172,37 @@ def test_api_success_and_english_test_uses_foreign_sample(tmp_path, monkeypatch)
         assert kwargs['params']['q'].startswith('你好')
         return httpx.Response(200, json=payload('Hello, welcome!', 'zh-CN'))
     with TestClient(app) as client:
-        monkeypatch.setattr(app.state.client, 'get', respond)
+        assert isinstance(app.state.hub.google.client, AsyncSession)
+        assert app.state.hub.google.client is not app.state.client
+        monkeypatch.setattr(app.state.hub.google.client, 'get', respond)
         client.put('/api/config', json={'target_language': 'en'})
         result = client.post('/api/translation/test')
         assert result.status_code == 200
         assert result.json()['translation'] == 'Hello, welcome!'
         assert result.json()['source_language'] == 'zh-Hans'
+
+
+async def test_libcurl_network_error_keeps_worker_alive_and_hides_request_details(monkeypatch):
+    async with AsyncSession() as client:
+        async def unavailable(*args, **kwargs):
+            raise RequestException('PRIVATE URL AND MESSAGE')
+        monkeypatch.setattr(client, 'get', unavailable)
+        provider = GoogleWebTranslator(client)
+        provider.interval = 0
+        with pytest.raises(TranslationError) as error:
+            await provider.translate('Hello', 'ja')
+        assert error.value.code == 'unavailable'
+        assert 'PRIVATE' not in str(error.value)
+        results = []
+        pool = TranslationPool(provider, 'ja', lambda *args: results.append(args), lambda *args: None, concurrency=1)
+        pool.start()
+        try:
+            pool.submit('one', 'hello')
+            await asyncio.wait_for(pool.queue.join(), 1)
+            assert results == [('one', None, 'failed')]
+            assert not pool.workers[0].done() and not provider.paused
+        finally:
+            await pool.close()
 
 
 async def test_diagnostic_and_live_chat_share_guard_and_provider_switch_cancels_old_jobs():

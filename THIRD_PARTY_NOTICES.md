@@ -17,6 +17,12 @@
 - 许可：页面注明代码示例为 Apache-2.0，完整许可见 `licenses/Apache-2.0.txt`。
 - 改动：补充示例遗漏的 `google/protobuf/duration.proto` import；生成客户端后的内部 import 改为包内相对 import。服务名、字段序号和枚举保持官方定义。
 
+## curl_cffi
+
+- Google 网页翻译使用 curl_cffi 0.16.3 的异步 libcurl 会话，正常请求模式，未启用浏览器指纹模拟。
+- 上游：https://github.com/lexiforest/curl_cffi
+- 许可：MIT，完整文本见 `licenses/curl-cffi-MIT.txt`。原生库及传递依赖保留各自许可证。
+
 ## 依赖
 
 Python 运行依赖固定在 `requirements.txt`，前端依赖固定在 `frontend/package-lock.json`。各依赖保留其自身许可证。

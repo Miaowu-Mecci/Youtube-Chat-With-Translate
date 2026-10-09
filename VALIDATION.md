@@ -50,3 +50,12 @@
 - 早期 Google 网页接口探测返回 **HTTP 429**；用户随后反馈本地和当前环境的命令行请求可返回 **HTTP 200**，这不等同于已完成真实直播翻译验收。请在用户电脑上使用「保存并测试翻译」验证可达性。程序处理限流并保留原文，不自动切换付费服务。
 - 最终功能提交已通过 [Windows CI](https://github.com/Miaowu-Mecci/Youtube-Chat-With-Translate/actions/runs/37912901726) 的 EXE 实际启动验证，包括 Google 默认配置与八种目标语言；真实 YouTube / Azure 接入及 Windows OBS 人工验收仍待完成。
 - Google 功能初次交付使用手动 CI artifact；随后按用户要求发布 `v0.1.1`，由版本标签再次触发 Windows 构建与测试，通过后自动上传 Release 附件。既有 `v0.1.0` 保持不变。
+
+
+## Google 请求客户端修复验证（2026-10-09）
+
+- 同一环境同一 `Hello world` 请求：curl 返回 200，旧 httpx 返回 429；单独开启 httpx HTTP/2 仍返回 429。未将原因归结为单一协议版本或认定 Google 接口整体失效。
+- Google 生产请求改用独立的 curl_cffi 异步 libcurl 会话；不启用浏览器指纹模拟、不做 429 后的客户端回退；保留单并发、1 秒间隔、60 秒冷却、连续三次限流暂停及请求超时。Azure / YouTube 继续使用原客户端。
+- 真实应用 `POST /api/translation/test` 返回 200，固定样例译文「您好，欢迎来到直播！」；真实弹幕翻译队列产生同一消息 ID 的 `translation_status=complete` 事件，译文「大家晚上好！」。这些验证未接入真实 YouTube 直播。
+- Python **88 项通过**、Chromium **8 项通过**；新增 libcurl 网络错误脱敏与 worker 存活回归，并验证生产应用使用独立 libcurl 会话。浏览器测试验证译文原位显示，外部翻译结果仍使用模拟。
+- PyInstaller 收集 curl_cffi 原生库与 CFFI 依赖；Windows EXE 由手动 CI 构建并执行实际启动检查。本次修复不修改已发布的 v0.1.1 附件。
