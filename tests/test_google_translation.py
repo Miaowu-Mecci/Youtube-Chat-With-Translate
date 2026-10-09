@@ -251,3 +251,41 @@ async def test_configuration_change_cancels_diagnostic():
             await test
         assert error.value.code == 'stale'
         assert not hub.google.lock.locked()
+
+
+async def test_resume_restores_unfinished_messages_without_duplicate_or_stale_updates():
+    started, release = asyncio.Event(), asyncio.Event()
+    calls = []
+    async def respond(request):
+        text = request.url.params['q']
+        calls.append(text)
+        if text != 'first':
+            started.set()
+            await release.wait()
+        return httpx.Response(200, json=payload('訳文 ' + text, 'en'))
+    class Source:
+        async def resolve(self, *args): return 'CHAT'
+        async def stream(self, *args):
+            for mid, text in [('one', 'first'), ('two', 'second'), ('three', 'third'), ('four', 'third'), ('deleted', 'deleted')]:
+                value = item()
+                value['id'] = mid
+                value['snippet']['textMessageDetails']['messageText'] = text
+                yield Batch([value], 'token')
+            await asyncio.Event().wait()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        hub = ChatHub(Config(source='CHAT', youtube_key='YT', translation_enabled=True, target_language='ja'), Source(), client)
+        hub.google.interval = 0
+        await hub.connect()
+        try:
+            await asyncio.wait_for(started.wait(), 1)
+            assert hub.messages['one']['translation'] == '訳文 first'
+            hub.delete(['deleted'])
+            await hub.resume_translation()
+            assert hub.current_status()['translation_counts']['pending'] == 3
+            release.set()
+            await asyncio.wait_for(hub.pool.queue.join(), 1)
+            assert [hub.messages[mid]['translation'] for mid in ('one', 'two', 'three', 'four')] == ['訳文 first', '訳文 second', '訳文 third', '訳文 third']
+            assert calls.count('first') == 1 and calls.count('third') == 1 and 'deleted' not in calls
+            assert hub.current_status()['translation_counts'] == {'pending': 0, 'complete': 4, 'failed': 0, 'skipped': 0}
+        finally:
+            await hub.stop()

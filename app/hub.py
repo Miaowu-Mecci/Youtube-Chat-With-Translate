@@ -28,7 +28,18 @@ class ChatHub:
 
     def snapshot(self):
         return {"type": "snapshot", "session": self.session, "messages": copy.deepcopy(list(self.messages.values())),
-                "config": self.config.public(), "status": self.status.copy()}
+                "config": self.config.public(), "status": self.current_status()}
+
+    def current_status(self):
+        counts = {state: 0 for state in ("pending", "complete", "failed", "skipped")}
+        for message in self.messages.values():
+            state = message.get("translation_status", "skipped")
+            if state in counts:
+                counts[state] += 1
+        return {**self.status, "translation_counts": counts}
+
+    def publish_progress(self):
+        self.publish({"type": "status", "status": self.current_status()})
 
     def subscribe(self):
         queue = asyncio.Queue(maxsize=1000)
@@ -49,13 +60,13 @@ class ChatHub:
 
     def set_status(self, connection: str, message: str, code: str = ""):
         self.status.update(connection=connection, message=message, code=code)
-        self.publish({"type": "status", "status": self.status.copy()})
+        self.publish_progress()
 
     def translation_state(self, state, message):
         if self.status["translation"] == state and self.status["translation_message"] == message:
             return
         self.status.update(translation=state, translation_message=message)
-        self.publish({"type": "status", "status": self.status.copy()})
+        self.publish_progress()
 
     def translated(self, mid: str, result: Result | None, status: str):
         message = self.messages.get(mid)
@@ -70,6 +81,7 @@ class ChatHub:
                 fields["translation"] = result.text
         message.update(fields)
         self.publish({"type": "translation", "id": mid, **fields})
+        self.publish_progress()
 
     def google_state(self, state, message):
         if self.config.translation_provider == "google_web" and self.mode != "demo":
@@ -115,8 +127,17 @@ class ChatHub:
                 self.google.resume()
             if self.mode == "live" and self.task and not self.task.done():
                 await self.setup_translation()
-                self.mark_pending_failed()
-            return self.status
+                if self.pool:
+                    # Explicit recovery must restore jobs cancelled by setup_translation.
+                    for message in self.messages.values():
+                        if message["translation_status"] != "complete":
+                            state = self.pool.submit(message["id"], message["original"])
+                            if state != "complete":
+                                self.translated(message["id"], None, state)
+                else:
+                    self.mark_pending_failed()
+            self.publish_progress()
+            return self.current_status()
 
     async def setup_translation(self):
         if self.pool:
@@ -132,6 +153,7 @@ class ChatHub:
             self.pool = TranslationPool(
                 self.provider(), self.config.target_language, self.translated, self.translation_state,
                 concurrency=1 if self.config.translation_provider == "google_web" else 4,
+                is_current=lambda mid: mid in self.messages,
             )
             self.pool.start()
             if self.config.translation_provider == "google_web" and self.google.paused:
@@ -240,6 +262,7 @@ class ChatHub:
                 message["translation_status"] = state
                 self.publish({"type": "translation", "id": mid, "translation": message["translation"],
                               "source_language": message["source_language"], "translation_status": state})
+        self.publish_progress()
 
     def delete(self, ids: list[str]):
         ids = [mid for mid in ids if mid]
@@ -248,6 +271,7 @@ class ChatHub:
             self.remember(self.deleted, mid)
         if ids:
             self.publish({"type": "delete", "ids": ids})
+            self.publish_progress()
 
     def consume(self, item: dict) -> bool:
         event = map_item(item)

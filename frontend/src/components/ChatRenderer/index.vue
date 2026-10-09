@@ -274,6 +274,15 @@ export default {
       }
     },
     updateMessage(id, newValuesObj) {
+      // A translation for an existing row should not wait behind new-chat scrolling.
+      if ([this.messages, this.paidMessages, this.messagesBuffer].some(arr => arr.some(message => message.id === id))) {
+        this.handleUpdateMessage({ id, newValuesObj })
+        this.$nextTick(() => {
+          this.maybeResizeScrollContainer()
+          this.maybeScrollToBottom()
+        })
+        return
+      }
       this.enqueueMessages([{
         type: constants.MESSAGE_TYPE_UPDATE,
         id,

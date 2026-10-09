@@ -162,3 +162,37 @@ test('Azure language lookup failure preserves an existing target on upgrade', as
   await expect(page.getByRole('status')).toContainText('设置已保存')
   expect((await (await request.get('/api/config')).json()).target_language).toBe('it')
 })
+
+test('successive Japanese translations appear in preview and OBS without duplicate rows', async ({ page, context }) => {
+  const sockets = []
+  await context.routeWebSocket('**/ws', ws => {
+    sockets.push(ws)
+    ws.send(JSON.stringify({ type: 'snapshot', session: 'continuous', messages: [], config, status: {} }))
+  })
+  await page.goto('/')
+  const preview = page.frameLocator('iframe')
+  const obs = await context.newPage()
+  await obs.goto('/overlay')
+  await expect.poll(() => sockets.length).toBe(3)
+  const send = event => sockets.forEach(ws => ws.send(JSON.stringify({ session: 'continuous', ...event })))
+  for (let i = 0; i < 6; i++) {
+    send({ type: 'message', message: { id: `continuous-${i}`, author: 'Test', original: `English message ${i}`, avatar: '', role: 'normal', time: new Date().toISOString(), translation: '' } })
+  }
+  await expect(preview.locator('yt-live-chat-text-message-renderer')).toHaveCount(6)
+  await expect(obs.locator('yt-live-chat-text-message-renderer')).toHaveCount(6)
+  for (let i = 0; i < 6; i++) {
+    send({ type: 'translation', id: `continuous-${i}`, translation: `日本語の翻訳 ${i}` })
+    for (const surface of [preview, obs]) {
+      await expect(surface.locator(`[data-message-id="continuous-${i}"] .translation`)).toHaveText(`日本語の翻訳 ${i}`)
+      await expect(surface.locator(`[data-message-id="continuous-${i}"] #message`)).toHaveText(`English message ${i}`)
+    }
+  }
+  for (const surface of [preview, obs]) await expect(surface.locator('yt-live-chat-text-message-renderer')).toHaveCount(6)
+  send({ type: 'delete', ids: ['continuous-1'] })
+  for (const surface of [preview, obs]) await expect(surface.locator('[data-message-id="continuous-1"]')).toHaveCount(0)
+  send({ type: 'translation', id: 'continuous-1', translation: '遅い翻訳' })
+  for (const surface of [preview, obs]) await expect(surface.locator('yt-live-chat-text-message-renderer')).toHaveCount(5)
+  send({ type: 'status', status: { connection: 'connected', translation_message: '翻译运行中。', translation_counts: { pending: 2, complete: 3, failed: 1, skipped: 0 } } })
+  await expect(page.getByLabel('翻译进度')).toContainText('等待 2 · 已完成 3 · 失败 1')
+  await obs.close()
+})

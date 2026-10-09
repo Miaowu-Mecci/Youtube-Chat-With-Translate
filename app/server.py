@@ -88,7 +88,7 @@ def create_app(config_path: Path | None = None, source_factory=YouTubeSource):
 
     @app.get("/api/status")
     async def get_status():
-        return {**app.state.hub.status, "clients": len(app.state.hub.clients)}
+        return {**app.state.hub.current_status(), "clients": len(app.state.hub.clients)}
 
     @app.post("/api/connect")
     async def connect():
