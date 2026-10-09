@@ -23,6 +23,8 @@
 
 **下载已发布版本**：在仓库的 Releases 页面下载 `YouTubeOBSChat-Windows-x64.zip`，解压后运行其中的 `YouTubeOBSChat.exe`；压缩包包含使用文档和第三方许可证。也提供单独的 EXE 和 `SHA256SUMS.txt` 校验文件。
 
+**v0.1.1 补充修复版**：建议直接下载 [YouTubeOBSChat-TranslationFix.exe](https://github.com/Miaowu-Mecci/Youtube-Chat-With-Translate/releases/download/v0.1.1/YouTubeOBSChat-TranslationFix.exe)，包含 Google 请求客户端与连续翻译队列修复。关闭旧程序后运行新文件，并刷新设置页与 OBS 浏览器源；原始 v0.1.1 的 EXE / ZIP 及先前 `GoogleFix.exe` 不包含这次队列恢复修复。
+
 **GitHub 构建**：在 Actions 中选择 **Build Windows EXE → Run workflow**，构建通过后下载 `YouTubeOBSChat-Windows-x64` artifact。推送 `v*` 版本标签时，CI 在 Windows x64 上运行自动测试、生成 EXE 并实际启动验证，全部通过后自动创建 Release 并上传 EXE、发行压缩包及 SHA-256 校验文件；手动构建仅生成 artifact。
 
 EXE 的使用方式：

@@ -70,3 +70,4 @@
 - Python **91 项通过**；恢复测试覆盖首条成功、第二条处理中、后续排队、重复文本、删除及恢复后的连续完成。队列失效清理与异常暂停均有回归验证。
 - Chromium **9 项通过**；新测试向预览与独立 OBS 页面连续更新六条日语译文，确认原文、译文、行数及删除后迟到译文正确，验证进度提示。外部服务在浏览器测试中模拟。
 - 真实 Google 目标语言为日语，连续三条公开样例在约 **3.53 秒**内完成，均产生非空译文。此时延只代表当前测试网络，不是用户网络保证；未进行真实 YouTube / Windows OBS 人工验收。
+- [Windows 连续翻译修复 CI](https://github.com/Miaowu-Mecci/Youtube-Chat-With-Translate/actions/runs/37921737914) 已通过 91 项回归、EXE 构建及实际启动验证；产物校验和与 ZIP 完整性已核验。独立 `YouTubeOBSChat-TranslationFix.exe` 已作为 v0.1.1 的新增附件提供，既有文件未覆盖。
