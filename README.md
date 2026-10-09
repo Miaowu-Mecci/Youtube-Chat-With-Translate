@@ -21,7 +21,9 @@
 
 **本机打包**：在 Windows 上双击 `build-exe.cmd`。脚本安装依赖、构建前端、生成单文件并进行实际启动冒烟测试；成功后产物为 `dist/YouTubeOBSChat.exe`。
 
-**GitHub 构建**：将项目放入自己的 GitHub 仓库，在 Actions 中选择 **Build Windows EXE → Run workflow**。构建通过后下载 `YouTubeOBSChat-Windows-x64` artifact，解压得到 EXE 和许可文档。流程仅手动触发，不自动发布 Release。
+**下载已发布版本**：在仓库的 Releases 页面下载 `YouTubeOBSChat-Windows-x64.zip`，解压后运行其中的 `YouTubeOBSChat.exe`；压缩包包含使用文档和第三方许可证。也提供单独的 EXE 和 `SHA256SUMS.txt` 校验文件。
+
+**GitHub 构建**：在 Actions 中选择 **Build Windows EXE → Run workflow**，构建通过后下载 `YouTubeOBSChat-Windows-x64` artifact。推送 `v*` 版本标签时，CI 在 Windows x64 上运行自动测试、生成 EXE 并实际启动验证，全部通过后自动创建 Release 并上传 EXE、发行压缩包及 SHA-256 校验文件；手动构建仅生成 artifact。
 
 EXE 的使用方式：
 
