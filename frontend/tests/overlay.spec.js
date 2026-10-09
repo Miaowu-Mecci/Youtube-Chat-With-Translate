@@ -196,3 +196,32 @@ test('successive Japanese translations appear in preview and OBS without duplica
   await expect(page.getByLabel('翻译进度')).toContainText('等待 2 · 已完成 3 · 失败 1')
   await obs.close()
 })
+
+test('connect sends the click time before saving settings and explains history filtering', async ({ page }) => {
+  let releaseSave, connectionBody
+  const sockets = []
+  await page.routeWebSocket('**/ws', ws => {
+    sockets.push(ws)
+    ws.send(JSON.stringify({ type: 'snapshot', session: 'fresh', messages: [], config, status: {} }))
+  })
+  await page.goto('/')
+  await expect(page.getByRole('button', { name: '连接直播间' })).toBeEnabled()
+  await page.route('**/api/config', async route => {
+    if (route.request().method() !== 'PUT') return route.continue()
+    await new Promise(resolve => { releaseSave = resolve })
+    await route.continue()
+  })
+  await page.route('**/api/connect', async route => {
+    connectionBody = route.request().postDataJSON()
+    await route.fulfill({ json: { connection: 'connecting' } })
+  })
+  await page.getByRole('button', { name: '连接直播间' }).click()
+  await expect.poll(() => Boolean(releaseSave)).toBe(true)
+  const beforeSaveCompleted = Date.now()
+  releaseSave()
+  await expect.poll(() => Boolean(connectionBody)).toBe(true)
+  expect(Date.parse(connectionBody.started_at)).toBeLessThanOrEqual(beforeSaveCompleted)
+  sockets.forEach(ws => ws.send(JSON.stringify({ type: 'status', session: 'fresh', status: { connection: 'connected', chat_started_at: connectionBody.started_at, ignored_history: 500 } })))
+  await expect(page.getByText('仅收录点击「连接直播间」后发布的新弹幕，不显示或翻译此前的历史弹幕。')).toBeVisible()
+  await expect(page.getByText('已过滤 500 条历史弹幕；自动重连继续使用本次连接的起点。')).toBeVisible()
+})

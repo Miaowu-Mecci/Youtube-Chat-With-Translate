@@ -1,6 +1,7 @@
 import asyncio
 import json
 import time
+from datetime import datetime, timezone
 
 import httpx
 import pytest
@@ -17,7 +18,7 @@ from app.youtube import Batch
 
 def item():
     return {'id': 'one', 'snippet': {'type': 'textMessageEvent',
-            'publishedAt': '2026-10-09T00:00:00Z', 'textMessageDetails': {'messageText': 'hello'}},
+            'publishedAt': datetime.now(timezone.utc).isoformat(), 'textMessageDetails': {'messageText': 'hello'}},
             'authorDetails': {'channelId': 'author', 'displayName': 'Alice'}}
 
 

@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.request import urlopen, Request
 
@@ -55,6 +56,11 @@ def smoke(binary: Path):
                 persisted = json.loads((Path(directory) / "config.json").read_text("utf-8"))
                 assert persisted["target_language"] == "ja"
                 request("/api/config", "PUT", {"target_language": "zh-Hans"})
+                clicked_at = datetime.now(timezone.utc).isoformat()
+                # No YouTube key: exercise the packaged API without external requests.
+                connection = json.loads(request("/api/connect", "POST", {"started_at": clicked_at}))
+                assert connection["chat_started_at"] == clicked_at
+                assert connection["ignored_history"] == 0
                 request("/api/demo", "POST")
 
                 async def check_socket():

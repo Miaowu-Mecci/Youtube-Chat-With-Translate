@@ -9,7 +9,7 @@ from fastapi import FastAPI, Request, WebSocket
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import ValidationError
+from pydantic import AwareDatetime, BaseModel, ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .config import Config, ConfigStore, GOOGLE_LANGUAGES
@@ -23,6 +23,10 @@ FALLBACK_LANGUAGES = [{"code": code, "name": name} for code, name in [
     ("zh-Hans", "简体中文"), ("zh-Hant", "繁體中文"), ("en", "English"),
     ("ja", "日本語"), ("ko", "한국어"), ("es", "Español"), ("fr", "Français"), ("de", "Deutsch"),
 ]]
+
+
+class ConnectRequest(BaseModel):
+    started_at: AwareDatetime | None = None
 
 
 def valid_origin(origin: str | None, host: str) -> bool:
@@ -91,9 +95,9 @@ def create_app(config_path: Path | None = None, source_factory=YouTubeSource):
         return {**app.state.hub.current_status(), "clients": len(app.state.hub.clients)}
 
     @app.post("/api/connect")
-    async def connect():
-        await app.state.hub.connect()
-        return app.state.hub.status
+    async def connect(payload: ConnectRequest | None = None):
+        await app.state.hub.connect(started_at=payload.started_at if payload else None)
+        return app.state.hub.current_status()
 
     @app.post("/api/disconnect")
     async def disconnect():

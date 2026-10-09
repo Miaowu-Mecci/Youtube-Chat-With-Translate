@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
@@ -9,7 +10,7 @@ from app.youtube import Batch, SourceError
 
 
 def item(mid='one', author='author'):
-    return {'id': mid, 'snippet': {'type': 'textMessageEvent', 'publishedAt': '2026-10-09T00:00:00Z',
+    return {'id': mid, 'snippet': {'type': 'textMessageEvent', 'publishedAt': datetime.now(timezone.utc).isoformat(),
                                   'textMessageDetails': {'messageText': 'hello'}},
             'authorDetails': {'channelId': author, 'displayName': 'Alice'}}
 
@@ -182,3 +183,98 @@ async def test_cached_translation_is_published_after_original():
     assert events[1]['message']['translation'] == ''
     assert events[2]['type'] == 'translation'
     assert hub.messages['one']['translation'] == '你好'
+
+
+def timed_item(mid, published):
+    value = item(mid)
+    value['snippet']['publishedAt'] = published
+    return value
+
+
+async def test_connection_filters_history_before_enqueue_and_preserves_click_during_resolve():
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=5)
+    resolving, release, delivered = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    class Source:
+        async def resolve(self, *args):
+            resolving.set()
+            await release.wait()
+            return 'CHAT'
+        async def stream(self, *args):
+            old = [timed_item(f'old-{i}', (cutoff - timedelta(seconds=1)).isoformat()) for i in range(500)]
+            new = timed_item('during-resolve', (cutoff + timedelta(seconds=1)).isoformat())
+            yield Batch(old + [new], 'token')
+            delivered.set()
+            await asyncio.Event().wait()
+    calls = []
+    async def translate(request):
+        calls.append(request.url.params['q'])
+        return httpx.Response(200, json=[[['こんにちは', 'hello']], None, 'en'])
+    async with httpx.AsyncClient(transport=httpx.MockTransport(translate)) as client:
+        hub = ChatHub(Config(source='CHAT', youtube_key='YT', translation_enabled=True, target_language='ja'), Source(), client)
+        connecting = asyncio.create_task(hub.connect(started_at=cutoff))
+        await asyncio.wait_for(resolving.wait(), 1)
+        assert hub.chat_started_at == cutoff
+        release.set()
+        await connecting
+        try:
+            await asyncio.wait_for(delivered.wait(), 1)
+            await asyncio.wait_for(hub.pool.queue.join(), 1)
+            assert list(hub.messages) == ['during-resolve']
+            assert hub.messages['during-resolve']['translation'] == 'こんにちは'
+            assert calls == ['hello']
+            assert hub.current_status()['ignored_history'] == 500
+            assert hub.current_status()['translation_counts']['complete'] == 1
+        finally:
+            await hub.stop()
+
+
+async def test_reconnect_keeps_cutoff_and_manual_new_connection_resets_it():
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=10)
+    delivered = asyncio.Event()
+    class Source:
+        def __init__(self): self.calls = []
+        async def resolve(self, *args): return 'CHAT'
+        async def stream(self, chat, key, token):
+            self.calls.append(token)
+            yield Batch([timed_item('old', (cutoff - timedelta(seconds=1)).isoformat()),
+                         timed_item('between', (cutoff + timedelta(seconds=1)).isoformat())], 'next')
+            if len(self.calls) == 1:
+                raise SourceError('network', 'retry', True)
+            yield Batch([timed_item('later', (cutoff + timedelta(seconds=3)).isoformat())], 'latest')
+            delivered.set()
+            await asyncio.Event().wait()
+    source = Source()
+    hub = ChatHub(Config(source='CHAT', youtube_key='YT'), source, None)
+    await hub.connect(started_at=cutoff)
+    try:
+        await asyncio.wait_for(delivered.wait(), 3)
+        assert hub.chat_started_at == cutoff
+        assert source.calls == ['', 'next']
+        assert list(hub.messages) == ['between', 'later']
+        assert hub.ignored_history == 1
+        await hub.connect(started_at=cutoff + timedelta(seconds=8))
+        assert hub.chat_started_at == cutoff  # Repeated connect shares the existing stream.
+        await hub.disconnect()
+        delivered.clear()
+        await hub.connect(started_at=cutoff + timedelta(seconds=2))
+        await asyncio.wait_for(delivered.wait(), 1)
+        assert list(hub.messages) == ['later']
+        assert hub.chat_started_at == cutoff + timedelta(seconds=2)
+        assert hub.ignored_history == 2
+    finally:
+        await hub.stop()
+
+
+def test_cutoff_handles_timezone_fractional_seconds_unknown_times_and_control_events():
+    cutoff = datetime(2026, 10, 9, 8, 0, 0, 500000, tzinfo=timezone.utc)
+    hub = ChatHub(Config(), None, None)
+    hub.mode, hub.chat_started_at = 'live', cutoff
+    for mid, timestamp in [('before', '2026-10-09T08:00:00.499999Z'), ('missing', ''),
+                           ('invalid', 'invalid'), ('naive', '2026-10-09T09:00:00')]:
+        assert not hub.consume(timed_item(mid, timestamp))
+    hub.consume(timed_item('at', '2026-10-09T16:00:00.500000+08:00'))
+    hub.consume(timed_item('after', '2026-10-09T08:00:00.500001Z'))
+    assert list(hub.messages) == ['at', 'after']
+    hub.consume({'id': 'delete', 'snippet': {'type': 'messageDeletedEvent', 'messageDeletedDetails': {'deletedMessageId': 'at'}}})
+    assert list(hub.messages) == ['after']
+    assert hub.consume({'id': 'ended', 'snippet': {'type': 'chatEndedEvent'}})

@@ -23,6 +23,8 @@
             <div class="helper-row"><a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noreferrer">启用 YouTube Data API ↗</a><button v-if="youtubeKeySet" class="text-button" @click="clearSecret('youtube_key')">清除 Key</button></div>
             <div class="button-row"><button class="primary" :disabled="busy" @click="action('connect', true)">连接直播间 <span>→</span></button><button class="secondary" :disabled="busy" @click="action('disconnect')">断开</button></div>
             <p class="connection-message">{{ status.message }}</p>
+            <p class="small">仅收录点击「连接直播间」后发布的新弹幕，不显示或翻译此前的历史弹幕。</p>
+            <p v-if="status.chat_started_at" class="small">已过滤 {{ status.ignored_history || 0 }} 条历史弹幕；自动重连继续使用本次连接的起点。</p>
           </section>
 
           <section class="card" id="translation">
@@ -162,8 +164,9 @@ export default {
       finally { this.busy = false }
     },
     async action(name, saveFirst = false) {
+      const clickedAt = new Date().toISOString()
       this.busy = true
-      try { if (saveFirst) await this.persist(); await this.api(`/api/${name}`, 'POST'); this.notice = name === 'demo' ? '演示模式已启动，简体中文译文为固定样例。' : '' }
+      try { if (saveFirst) await this.persist(); await this.api(`/api/${name}`, 'POST', name === 'connect' ? { started_at: clickedAt } : undefined); this.notice = name === 'demo' ? '演示模式已启动，简体中文译文为固定样例。' : '' }
       catch (error) { this.notice = error.message }
       finally { this.busy = false }
     },
