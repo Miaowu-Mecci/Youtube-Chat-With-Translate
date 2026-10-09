@@ -2,7 +2,7 @@
 
 本地运行的 YouTube 直播评论栏：输入直播链接，将透明网页加入 OBS 浏览器源；弹幕先显示原文，翻译完成后在同一条消息上方补充译文。
 
-前端复用 [blivechat](https://github.com/xfgryujk/blivechat) 的渲染组件、基础 DOM 和滚动效果，支持普通弹幕的既有 CSS 选择器。外部翻译采用 Azure Translator **F0 免费档**。
+前端复用 [blivechat](https://github.com/xfgryujk/blivechat) 的渲染组件、基础 DOM 和滚动效果，支持普通弹幕的既有 CSS 选择器。支持 **Google 翻译免 Key（实验性）** 和 Azure Translator **F0 免费档**。
 
 ## Windows 快速开始
 
@@ -10,7 +10,7 @@
 2. 下载或复制完整项目，双击 `install.cmd`。它创建 `.venv`、安装固定的 Python 运行依赖、执行 `npm ci`，并构建前端。首次安装需要联网。
 3. 双击 `start.cmd`，保持终端窗口打开；浏览器访问 **http://127.0.0.1:12450**。
 4. 无需凭据即可点击「体验演示」，确认原文、译文、样式和预览正常。
-5. 填写 YouTube 参数；需要机器翻译时，再填写 Azure 参数并开启翻译。
+5. 填写 YouTube 参数；在「双语翻译」选择 Google 免 Key 或 Azure F0、选择目标语言并开启翻译。Google 模式不需要翻译账号或 Key，YouTube 接入仍需要 YouTube API Key。
 6. 点击「连接直播间」。在 OBS 添加「浏览器」源，粘贴 **http://127.0.0.1:12450/overlay**，建议尺寸 **480 × 720**。
 
 源码部署使用 `start.cmd`；也可以按下方流程生成独立 EXE。前端只在安装或代码更新后需要重新构建。
@@ -49,24 +49,45 @@ Windows EXE 必须由 Windows 本机构建或 Actions Windows runner 生成；�
 
 YouTube API 有项目配额；`streamList` 每次调用的官方配额成本为 5 单位。程序共享上游连接、带续传令牌重连，不按浏览器数量重复拉取。不承诺免费配额能覆盖任意直播时长；配额耗尽、凭据无效或聊天关闭时停止自动重试并提示。[官方接口](https://developers.google.com/youtube/v3/live/docs/liveChatMessages/streamList)
 
+## Google 免 Key 翻译（实验性）
+
+此功能包含在当前源码及新版 CI artifact 中；已经发布的 `v0.1.0` 不包含该功能，请从新版 Actions 构建下载。
+
+1. 启动程序，打开 `http://127.0.0.1:12450`，在「双语翻译」选择 **Google 翻译 · 免 Key（实验性）**。
+2. 选择目标语言：简体中文、繁体中文、英语、日语、韩语、西班牙语、法语或德语。
+3. 点击 **保存并测试翻译**。程序会向 Google 发送固定外语样例并显示真实结果；不需要连接 YouTube，测试请求不受弹幕翻译开关控制。测试失败时会显示限流、网络不可达或接口变化等原因。
+4. 开启翻译并保存设置，连接真实 YouTube 直播间；原文立即显示，译文完成后在同一条消息上方补上。
+
+此模式无需登录、创建 Google Cloud 项目、填写翻译 Key 或开通结算。它直接使用非官方网页接口，**不是官方 Cloud Translation API，没有固定免费额度或稳定性保证**。Google 官方 API 的每月 50 万字符抵扣额度与本模式无关。[官方价格说明](https://cloud.google.com/products/translate/pricing)
+
+Google 默认单并发、相邻请求至少间隔 1 秒、队列最多 200 个任务、网络请求超时 5 秒。重复文本合并请求并缓存结果；纯表情、数字、链接跳过翻译。429 限流后新请求等待 60 秒，失败消息不重试；连续三次 429 后暂停。403、验证码页面和响应格式变化会暂停翻译。此时可点击 **恢复翻译**，或手动切换 Azure；恢复操作不能跳过现有冷却时间，程序也不会自动切换付费接口。
+
+翻译测试和弹幕请求共享同一把连接锁、请求间隔、冷却与暂停状态。测试正在进行或直播翻译正占用连接时，重复测试会提示稍后重试；Google 网络不可达时仍保留原文。当前开发网络的真实探测返回 429，模拟测试不能代表你所在网络可用，建议先在自己的电脑上使用测试按钮确认。
+
+新安装默认选择 Google，翻译开关仍关闭；旧版本配置缺少 `translation_provider` 时按 Azure 读取，原凭据保留。切换服务时，不支持的目标语言自动改为简体中文并提示；切换服务或语言会取消旧任务，清除旧译文并重译当前保留消息，不重启 YouTube 连接。切换到 Google 不会删除已保存的 Azure Key。
+
+开启 Google 翻译后，弹幕正文会发送至 Google；作者名称、头像和本地密钥不包含在翻译请求正文中。请求使用 HTTPS，程序不记录包含弹幕内容的外部请求 URL。
+
+实现参考沉浸式翻译的服务适配、缓存与双语展示思路，以及其[早期公开实现](https://github.com/immersive-translate/old-immersive-translate/blob/main/src/background/translationService.js)和 [googletrans 的请求协议](https://github.com/ssut/py-googletrans/blob/main/googletrans/client.py)，适配器代码独立编写，未复制其源码；不依赖插件安装、浏览器登录或私有代理。
+
 ## Azure 免费翻译
 
 1. 注册 Azure，在 [Azure Portal](https://portal.azure.com/) 创建 **Translator** 资源。
 2. **定价层必须选择 F0 免费档**，不要选择 S1、付费多服务资源或自动升级套餐。
 3. 在资源的「Keys and Endpoint」页面复制 Key 和区域，填入本工具。例如区域为 `eastasia`，使用资源实际显示值。
-4. 开启翻译，选择主播语言，点击「保存设置」；若尚未连接，再点击「连接直播间」。
+4. 在服务下拉框选择 Azure F0，开启翻译，选择主播语言，点击「保存设置」；若尚未连接，再点击「连接直播间」。
 
 截至 2026-10-09，Azure F0 标准翻译每月提供 **200 万字符免费额度**；实际限制以账号和官方页面为准。本工具只调用标准文本翻译接口，不自动升级资源或切换到付费服务。[官方价格](https://azure.microsoft.com/en-us/pricing/details/translator/)
 
 程序省略 `from` 参数，让 Azure 自动识别源语言；目标语言列表从官方 `/languages` 接口读取。如果列表暂不可用，显示内置常用语言并提示。配置源语言相同或译文与原文相同的消息只显示一份。短句、混合语言、俚语和人名的识别与翻译可能不准确。[翻译接口](https://learn.microsoft.com/en-us/azure/ai-services/translator/text-translation/reference/v3/translate)
 
-默认 4 个翻译 worker、200 个排队任务、每次调用最多等待 5 秒。重复文本共享请求，完成结果保存在最多 1000 条的内存缓存中；纯表情、数字、链接或空文本跳过翻译。限流退避 2 秒，当前消息保留原文；超时或服务失败也保留原文。鉴权或额度错误暂停翻译，修改翻译配置或断开后重新连接可恢复。
+默认 4 个翻译 worker、200 个排队任务、每次调用最多等待 5 秒。重复文本共享请求，完成结果保存在最多 1000 条的内存缓存中；纯表情、数字、链接或空文本跳过翻译。限流退避 2 秒，当前消息保留原文；超时或服务失败也保留原文。鉴权或额度错误暂停翻译，点击「恢复翻译」、修改翻译配置或断开后重新连接可恢复。
 
 开启翻译后，消息文本会发送给 Azure；作者名称、头像和 API Key 不包含在翻译正文中。Azure 资源是否为 F0 无法从翻译接口可靠判断，必须由用户创建资源时确认。本工具不显示账号实际剩余额度。
 
 ## 演示与样式
 
-演示使用固定的日语、英语、中文、西班牙语和韩语样例；译文在原文到达约 0.7 秒后加入。不访问 YouTube 或翻译 API，不需要 Key。固定译文仅适用于简体中文目标；选择其他语言的演示只展示原文。真实翻译使用 Azure API。
+演示使用固定的日语、英语、中文、西班牙语和韩语样例；译文在原文到达约 0.7 秒后加入。不访问 YouTube 或翻译 API，不需要 Key。固定译文仅适用于简体中文目标；选择其他语言的演示只展示原文。真实翻译使用设置中选定的 Google 或 Azure 服务；演示模式不能验证这些服务是否可用。
 
 样式面板支持字号、原文颜色、译文颜色、头像显示、保留消息数量和任意自定义 CSS。修改样式即时影响预览；保存后同步所有 OBS 页面。「复制 CSS」可以将完整样式粘贴到 OBS 自定义 CSS。
 
@@ -110,7 +131,7 @@ Windows 手动运行时，将 `.venv/bin/python` 替换为 `.venv\Scripts\python
 
 可设置 `YTCHAT_DATA_DIR` 指定独立数据目录。不会在服务启动时自动连接；打开设置页后手动连接，避免后台意外消耗额度。
 
-YouTube 和 Azure API 必须能从本机访问。HTTP 请求遵循 httpx 的标准代理环境变量；gRPC 使用其自身的 HTTP CONNECT 代理配置。代理需要支持 TLS 和 HTTP/2。访问失败时查看设置页的状态信息，不要通过分享配置文件排查密钥问题。
+YouTube 和选定的 Google / Azure 翻译服务必须能从本机访问。HTTP 请求遵循 httpx 的标准代理环境变量；gRPC 使用其自身的 HTTP CONNECT 代理配置。代理需要支持 TLS 和 HTTP/2。访问失败时查看设置页的状态信息，不要通过分享配置文件排查密钥问题。
 
 ## API 与数据流
 
@@ -122,12 +143,14 @@ YouTube 和 Azure API 必须能从本机访问。HTTP 请求遵循 httpx 的标�
 | `POST /api/disconnect` | 停止上游与翻译，保留已显示消息 |
 | `POST /api/demo` | 启动固定样例演示 |
 | `GET /api/status` | 读取连接、翻译状态和浏览器连接数 |
-| `GET /api/languages` | 返回官方支持语言列表或内置回退列表 |
+| `GET /api/languages?provider=google_web或azure` | 返回指定服务的目标语言列表；省略参数使用已保存的服务，Google 为固定八种语言 |
+| `POST /api/translation/test` | 使用已保存配置翻译固定外语样例；无需直播、允许翻译开关关闭时测试；失败返回脱敏错误及 code |
+| `POST /api/translation/resume` | 手动恢复选定服务；Google 仍遵守已有冷却时间 |
 | `WS /ws` | 推送当前快照与后续事件 |
 
 WebSocket 事件含会话 `session`，类型为 `snapshot`、`message`、`translation`、`delete`、`status`。新增消息字段为 `id`、`author_id`、`author`、`avatar`、`role`、`time`、`original`、`translation`、`source_language` 和 `translation_status`。译文事件按 ID 原地更新，不重排或重新插入消息。
 
-换直播源或 YouTube Key 后连接停止并清空消息，需要重新连接；换目标语言或翻译凭据会取消旧任务，清除旧译文并重新翻译当前保留的消息，不重启 YouTube 连接。保存纯样式修改也不会重启上游连接。
+换直播源或 YouTube Key 后连接停止并清空消息，需要重新连接；换翻译服务、目标语言或翻译凭据会取消旧任务，清除旧译文并重新翻译当前保留的消息，不重启 YouTube 连接。保存纯样式修改也不会重启上游连接。
 
 保留消息最多 500 条，去重与删除 ID 各最多 10000 条。新浏览器连接获得当前快照；慢客户端积压时以最新快照替换队列。消息历史不落盘，服务重启后不会恢复旧聊天内容。
 

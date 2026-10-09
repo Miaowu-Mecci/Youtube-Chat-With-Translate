@@ -57,6 +57,109 @@ class AzureTranslator:
             raise TranslationError("unavailable") from None
 
 
+GOOGLE_CODES = {"zh-Hans": "zh-CN", "zh-Hant": "zh-TW", "en": "en", "ja": "ja",
+                "ko": "ko", "es": "es", "fr": "fr", "de": "de"}
+
+
+def normalize_google_language(language: str) -> str:
+    return {"zh-cn": "zh-Hans", "zh-tw": "zh-Hant"}.get(language.lower(), language.lower())
+
+
+class GoogleWebTranslator:
+    """Experimental web endpoint. One shared guard for chat and diagnostic requests."""
+
+    def __init__(self, client, on_state=lambda *args: None):
+        self.client, self.on_state = client, on_state
+        self.lock = asyncio.Lock()
+        self.interval = 1.0
+        self.backoff = 60.0
+        self.last_request = float("-inf")
+        self.cooldown_until = 0.0
+        self.rate_failures = 0
+        self.paused = False
+        self.pause_message = ""
+
+    def resume(self):
+        self.paused = False
+        self.rate_failures = 0
+        # Manual resume cannot evade a cooldown already imposed by the server.
+        self.on_state("active", "Google 网页翻译已恢复；仍遵守请求间隔和限流等待。")
+
+    async def wait_ready(self):
+        if self.paused:
+            return
+        await asyncio.sleep(max(0, self.cooldown_until - time.monotonic(),
+                                self.last_request + self.interval - time.monotonic()))
+
+    def report_error(self, code):
+        if code == "paused":
+            self.on_state("paused", self.pause_message)
+        elif code == "rate_limited":
+            self.rate_failures += 1
+            self.cooldown_until = time.monotonic() + self.backoff
+            if self.rate_failures >= 3:
+                self.paused = True
+                self.pause_message = "Google 连续三次限流，翻译已暂停；请稍后点击「恢复翻译」。"
+                self.on_state("paused", self.pause_message)
+            else:
+                self.on_state("rate_limited", "Google 网页翻译限流，暂停新请求 60 秒；失败消息保留原文。")
+        elif code in {"blocked", "invalid_response"}:
+            self.rate_failures = 0
+            self.paused = True
+            self.pause_message = ("Google 拒绝访问或要求验证码，翻译已暂停。请检查网络后恢复翻译。"
+                                  if code == "blocked" else
+                                  "Google 网页翻译接口响应格式已变化，翻译已暂停；请等待适配更新或切换 Azure。")
+            self.on_state("paused", self.pause_message)
+        elif code == "cooldown":
+            self.on_state("rate_limited", "Google 正在限流等待中，请稍后测试；当前保留原文。")
+        elif code != "busy":
+            self.rate_failures = 0
+            self.on_state("degraded", "Google 翻译超时或暂不可用，保留原文。")
+
+    async def translate(self, text: str, target: str) -> Result:
+        async with self.lock:
+            if self.paused:
+                raise TranslationError("paused")
+            if time.monotonic() < self.cooldown_until:
+                raise TranslationError("cooldown")
+            await asyncio.sleep(max(0, self.last_request + self.interval - time.monotonic()))
+            self.last_request = time.monotonic()
+            try:
+                response = await asyncio.wait_for(self.client.get(
+                    "https://translate.googleapis.com/translate_a/single",
+                    params={"client": "gtx", "sl": "auto", "tl": GOOGLE_CODES[target],
+                            "dt": "t", "q": text}, timeout=5,
+                ), 5)
+            except (httpx.HTTPError, TimeoutError):
+                raise TranslationError("unavailable") from None
+            if response.status_code == 429:
+                raise TranslationError("rate_limited")
+            if response.status_code in {401, 403}:
+                raise TranslationError("blocked")
+            if response.status_code >= 400:
+                raise TranslationError("unavailable")
+            if "text/html" in response.headers.get("content-type", "").lower() or response.text.lstrip().lower().startswith(("<!doctype html", "<html")):
+                raise TranslationError("blocked")
+            try:
+                data = response.json()
+                if not isinstance(data, list) or len(data) < 3 or not isinstance(data[0], list) or not data[0]:
+                    raise ValueError()
+                segments = []
+                for segment in data[0]:
+                    if not isinstance(segment, list) or not segment or not isinstance(segment[0], str):
+                        raise ValueError()
+                    segments.append(segment[0])
+                language = data[2]
+                translated = "".join(segments)
+                if not isinstance(language, str) or not language or not translated.strip():
+                    raise ValueError()
+            except (ValueError, TypeError, IndexError):
+                raise TranslationError("invalid_response") from None
+            self.rate_failures = 0
+            self.on_state("active", "Google 网页翻译运行中（实验性）。")
+            return Result(translated, normalize_google_language(language))
+
+
 class TranslationPool:
     """Bounded jobs, coalesced duplicate requests, and an in-memory LRU cache."""
 
@@ -86,7 +189,7 @@ class TranslationPool:
         self.cache.clear()
 
     def submit(self, mid: str, text: str) -> str:
-        if self.closed or self.paused or not should_translate(text):
+        if self.closed or self.paused or getattr(self.provider, "paused", False) or not should_translate(text):
             return "skipped"
         if text in self.cache:
             self.cache.move_to_end(text)
@@ -112,7 +215,12 @@ class TranslationPool:
                     await asyncio.sleep(max(0, self.cooldown_until - time.monotonic()))
                     # Another worker may have paused the pool while we waited.
                     if not self.paused:
-                        result = await asyncio.wait_for(self.provider.translate(text, self.target), self.timeout)
+                        if isinstance(self.provider, GoogleWebTranslator):
+                            # Pacing/cooldown is outside the five-second network timeout.
+                            await self.provider.wait_ready()
+                            result = await self.provider.translate(text, self.target)
+                        else:
+                            result = await asyncio.wait_for(self.provider.translate(text, self.target), self.timeout)
                         status = "complete"
                         if not self.paused:
                             self.on_state("active", "翻译运行中。")
@@ -121,6 +229,9 @@ class TranslationPool:
                             self.cache.popitem(last=False)
             except (TimeoutError, TranslationError) as error:
                 code = error.code if isinstance(error, TranslationError) else "timeout"
+                if isinstance(self.provider, GoogleWebTranslator):
+                    self.provider.report_error(code)
+                    continue
                 if self.paused and code != "credentials_or_quota":
                     continue
                 if code == "credentials_or_quota":

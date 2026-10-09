@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from .config import Config
-from .translation import AzureTranslator, TranslationPool, Result
+from .translation import AzureTranslator, GoogleWebTranslator, TranslationError, TranslationPool, Result
 from .youtube import SourceError, map_item
 
 
@@ -20,6 +20,8 @@ class ChatHub:
                        "translation": "off", "translation_message": "翻译未开启。"}
         self.task = None
         self.pool = None
+        self.google = GoogleWebTranslator(http_client, self.google_state)
+        self.test_task = None
         self.mode = "idle"
         self.session = uuid4().hex
         self.lock = asyncio.Lock()
@@ -69,6 +71,53 @@ class ChatHub:
         message.update(fields)
         self.publish({"type": "translation", "id": mid, **fields})
 
+    def google_state(self, state, message):
+        if self.config.translation_provider == "google_web" and self.mode != "demo":
+            self.translation_state(state, message)
+
+    def provider(self):
+        if self.config.translation_provider == "google_web":
+            return self.google
+        if not self.config.azure_key or not self.config.azure_region:
+            raise TranslationError("missing_credentials")
+        return AzureTranslator(self.http_client, self.config.azure_key, self.config.azure_region)
+
+    async def cancel_translation_test(self):
+        if self.test_task and not self.test_task.done():
+            self.test_task.cancel()
+            await asyncio.gather(self.test_task, return_exceptions=True)
+
+    async def test_translation(self):
+        async with self.lock:
+            if self.test_task and not self.test_task.done():
+                raise TranslationError("busy")
+            provider, target = self.provider(), self.config.target_language
+            if isinstance(provider, GoogleWebTranslator) and provider.lock.locked():
+                raise TranslationError("busy")
+            sample = "你好，欢迎观看直播！" if target == "en" else "Hello, welcome to the stream!"
+            self.test_task = asyncio.create_task(provider.translate(sample, target))
+            task = self.test_task
+        try:
+            result = await task
+            return {"provider": self.config.translation_provider, "target_language": target,
+                    "original": sample, "translation": result.text, "source_language": result.language}
+        except asyncio.CancelledError:
+            raise TranslationError("stale") from None
+        except TranslationError as error:
+            if isinstance(provider, GoogleWebTranslator):
+                provider.report_error(error.code)
+            raise
+
+    async def resume_translation(self):
+        async with self.lock:
+            await self.cancel_translation_test()
+            if self.config.translation_provider == "google_web":
+                self.google.resume()
+            if self.mode == "live" and self.task and not self.task.done():
+                await self.setup_translation()
+                self.mark_pending_failed()
+            return self.status
+
     async def setup_translation(self):
         if self.pool:
             await self.pool.close()
@@ -77,17 +126,21 @@ class ChatHub:
             self.translation_state("demo", "演示译文为固定样例，不调用外部 API。")
         elif not self.config.translation_enabled:
             self.translation_state("off", "翻译未开启。")
-        elif not self.config.azure_key or not self.config.azure_region:
+        elif self.config.translation_provider == "azure" and (not self.config.azure_key or not self.config.azure_region):
             self.translation_state("paused", "请填写 Azure Key 和区域；当前仅显示原文。")
         else:
             self.pool = TranslationPool(
-                AzureTranslator(self.http_client, self.config.azure_key, self.config.azure_region),
-                self.config.target_language, self.translated, self.translation_state,
+                self.provider(), self.config.target_language, self.translated, self.translation_state,
+                concurrency=1 if self.config.translation_provider == "google_web" else 4,
             )
             self.pool.start()
-            self.translation_state("active", "翻译运行中。")
+            if self.config.translation_provider == "google_web" and self.google.paused:
+                self.google.report_error("paused")
+            else:
+                self.translation_state("active", "翻译运行中；可点击「保存并测试翻译」验证服务。")
 
     async def stop(self):
+        await self.cancel_translation_test()
         if self.task:
             self.task.cancel()
             await asyncio.gather(self.task, return_exceptions=True)
@@ -115,6 +168,8 @@ class ChatHub:
             if self.task and not self.task.done() and self.mode == ("demo" if demo else "live"):
                 return
             await self.stop()
+            if self.google.paused:
+                self.google.resume()
             self.mode = "demo" if demo else "live"
             self.session = uuid4().hex
             self.messages.clear()
@@ -130,7 +185,9 @@ class ChatHub:
             old = self.config
             source_changed = any(getattr(old, key) != getattr(config, key) for key in ("source", "source_type", "youtube_key"))
             translation_changed = any(getattr(old, key) != getattr(config, key) for key in (
-                "target_language", "translation_enabled", "azure_key", "azure_region"))
+                "translation_provider", "target_language", "translation_enabled", "azure_key", "azure_region"))
+            if source_changed or translation_changed:
+                await self.cancel_translation_test()
             if source_changed:
                 await self.stop()
                 self.mode = "idle"

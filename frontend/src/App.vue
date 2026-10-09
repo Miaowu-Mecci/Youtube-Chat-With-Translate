@@ -28,11 +28,16 @@
           <section class="card" id="translation">
             <div class="card-heading"><h2><span class="step">02</span> 双语翻译</h2><label class="switch"><input type="checkbox" v-model="form.translation_enabled" aria-label="开启翻译"><span></span></label></div>
             <p class="card-description">原文即时出现，译文随后补上。让不同语言的观众一起参与。</p>
+            <label for="provider">翻译服务</label><select id="provider" v-model="form.translation_provider" @change="providerChanged"><option value="google_web">Google 翻译 · 免 Key（实验性）</option><option value="azure">Azure Translator · F0 免费档</option></select>
+            <p v-if="form.translation_provider === 'google_web'" class="small">免账号、免 Key；接口可能限流，失败时保留原文。</p>
             <label for="language">主播的目标语言</label><select id="language" v-model="form.target_language"><option v-for="language in languages" :key="language.code" :value="language.code">{{ language.name }} · {{ language.code }}</option></select>
             <div class="translation-flow"><span>自动识别观众语言</span><span>→</span><strong>{{ targetName }}</strong><span class="flow-badge">译文 + 原文</span></div>
-            <div class="field-row"><div><label for="azure-key">Azure Translator Key <span v-if="azureKeySet" class="saved">已保存</span></label><input id="azure-key" v-model="azureKey" type="password" :placeholder="azureKeySet ? '留空保留已保存的 Key' : '输入 F0 资源 Key'" autocomplete="new-password"></div><div><label for="region">资源区域</label><input id="region" v-model="form.azure_region" placeholder="例如 eastasia" autocomplete="off"></div></div>
-            <div class="helper-row"><a href="https://portal.azure.com/" target="_blank" rel="noreferrer">创建 Translator F0 免费资源 ↗</a><button v-if="azureKeySet" class="text-button" @click="clearSecret('azure_key')">清除 Key</button></div>
-            <div class="info-note"><span>ⓘ</span><span>使用 Azure F0 免费档，每月 200 万字符。额度不足或翻译失败时，弹幕继续显示原文。</span></div>
+            <div v-if="form.translation_provider === 'azure'" class="field-row"><div><label for="azure-key">Azure Translator Key <span v-if="azureKeySet" class="saved">已保存</span></label><input id="azure-key" v-model="azureKey" type="password" :placeholder="azureKeySet ? '留空保留已保存的 Key' : '输入 F0 资源 Key'" autocomplete="new-password"></div><div><label for="region">资源区域</label><input id="region" v-model="form.azure_region" placeholder="例如 eastasia" autocomplete="off"></div></div>
+            <div v-if="form.translation_provider === 'azure'" class="helper-row"><a href="https://portal.azure.com/" target="_blank" rel="noreferrer">创建 Translator F0 免费资源 ↗</a><button v-if="azureKeySet" class="text-button" @click="clearSecret('azure_key')">清除 Key</button></div>
+            <div v-if="form.translation_provider === 'azure'" class="info-note"><span>ⓘ</span><span>使用 Azure F0 免费档，每月 200 万字符。额度不足或翻译失败时，弹幕继续显示原文。</span></div>
+            <div class="button-row"><button class="secondary" :disabled="busy" @click="testTranslation">保存并测试翻译</button><button class="secondary" :disabled="busy" @click="resumeTranslation">恢复翻译</button></div>
+            <p class="small">测试会向选定服务发送固定外语样例，不需要连接 YouTube。测试翻译不受弹幕翻译开关控制。</p>
+            <p class="connection-message" role="status" aria-label="翻译测试结果" v-if="testResult">{{ testResult }}</p>
             <p class="connection-message">{{ status.translation_message }}</p>
             <p class="small" v-if="languageNotice">{{ languageNotice }}</p>
           </section>
@@ -50,7 +55,7 @@
         <div class="preview-column">
           <section class="card preview-card"><div class="card-heading"><h2>评论栏预览</h2><span class="preview-live"><span class="local-dot"></span> LIVE PREVIEW</span></div><div class="preview-screen"><div class="preview-caption">YOUR STREAM, CONNECTED.</div><iframe ref="preview" src="/overlay" title="OBS 评论栏实时预览" @load="draftPreview"></iframe><div v-if="!hasMessages" class="empty-state"><span>文 ↔ A</span><strong>跨越语言，开始对话</strong><p>连接直播间或点击「体验演示」<br>这里将展示你的双语评论栏</p></div></div><div class="preview-footer"><span>透明背景 · 译文在上，原文在下</span><a href="/overlay" target="_blank" rel="noreferrer">独立预览 ↗</a></div></section>
           <section class="card obs-card"><div class="card-heading"><h2>添加到 OBS</h2><span class="obs-badge">浏览器源</span></div><p class="card-description">在 OBS 中添加「浏览器」源，粘贴下方地址。</p><div class="url-box"><code>{{ overlayUrl }}</code><button aria-label="复制 OBS 地址" @click="copy(overlayUrl, 'OBS 地址已复制')">复制</button></div><div class="obs-tip"><span>建议尺寸</span><strong>480 × 720</strong></div><p class="small">OBS 自定义 CSS 保留透明背景设置即可。页面不包含控制按钮，多个浏览器源共享同一直播连接。</p></section>
-          <div class="privacy-note"><span>⌁</span><p>密钥只保存在本地。开启翻译后，弹幕文本会发送至 Azure Translator。演示模式不消耗额度。</p></div>
+          <div class="privacy-note"><span>⌁</span><p>密钥只保存在本地。开启翻译后，弹幕文本会发送至选定的 Google 或 Azure 服务。演示模式不消耗额度。</p></div>
         </div>
       </div>
       <footer class="page-footer"><span>Made for conversations, in every language.</span><a href="https://github.com/xfgryujk/blivechat" target="_blank" rel="noreferrer">渲染组件源自 blivechat · MIT ↗</a></footer>
@@ -61,14 +66,14 @@
 <script>
 import Overlay from './Overlay.vue'
 import { makeCSS } from './style'
-const initial = { source: '', source_type: 'auto', translation_enabled: false, azure_region: '', target_language: 'zh-Hans',
+const initial = { source: '', source_type: 'auto', translation_enabled: false, translation_provider: 'google_web', azure_region: '', target_language: 'zh-Hans',
   style: { font_size: 24, color: '#ffffff', translation_color: '#8de1cb', show_avatar: true, max_messages: 100, custom_css: '' } }
 export default {
   components: { Overlay },
   data: () => ({ isOverlay: location.pathname === '/overlay', form: JSON.parse(JSON.stringify(initial)),
     youtubeKey: '', azureKey: '', youtubeKeySet: false, azureKeySet: false,
     status: { connection: 'idle', message: '尚未连接。', translation_message: '翻译未开启。' },
-    languages: [{ code: 'zh-Hans', name: '简体中文' }], languageNotice: '', notice: '', busy: false, hasMessages: false,
+    testResult: '', languages: [{ code: 'zh-Hans', name: '简体中文' }], languageNotice: '', notice: '', busy: false, hasMessages: false,
     socket: null, retryTimer: null, stopped: false, ready: false }),
   computed: {
     overlayUrl() { return `${location.origin}/overlay` },
@@ -82,12 +87,7 @@ export default {
     window.addEventListener('message', this.previewReady)
     try { this.loadConfig(await this.api('/api/config')); this.ready = true } catch (error) { this.notice = error.message }
     this.listen()
-    try {
-      const data = await this.api('/api/languages')
-      this.languages = data.languages
-      if (!this.languages.some(item => item.code === this.form.target_language)) this.languages.push({ code: this.form.target_language, name: this.form.target_language })
-      this.languageNotice = data.message || ''
-    } catch { this.languageNotice = '语言列表暂不可用。' }
+    await this.loadLanguages()
   },
   beforeDestroy() {
     this.stopped = true
@@ -108,6 +108,42 @@ export default {
       this.youtubeKeySet = youtube_key_set
       this.azureKeySet = azure_key_set
       this.youtubeKey = ''; this.azureKey = ''
+    },
+    async loadLanguages() {
+      const provider = this.form.translation_provider
+      try {
+        const data = await this.api(`/api/languages?provider=${provider}`)
+        if (provider !== this.form.translation_provider) return
+        this.languages = data.languages
+        this.languageNotice = data.message || ''
+        if (!this.languages.some(item => item.code === this.form.target_language)) {
+          this.form.target_language = 'zh-Hans'
+          this.languageNotice = '当前服务不支持原目标语言，已改为简体中文；请保存设置。'
+        }
+      } catch { this.languageNotice = '语言列表暂不可用，请刷新页面重试。' }
+    },
+    async providerChanged() {
+      this.testResult = ''
+      await this.loadLanguages()
+    },
+    async testTranslation() {
+      this.busy = true
+      this.testResult = ''
+      try {
+        await this.persist()
+        const result = await this.api('/api/translation/test', 'POST')
+        this.testResult = `测试成功：${result.original} → ${result.translation}`
+      } catch (error) { this.testResult = error.message }
+      finally { this.busy = false }
+    },
+    async resumeTranslation() {
+      this.busy = true
+      try {
+        await this.persist()
+        await this.api('/api/translation/resume', 'POST')
+        this.testResult = '已请求恢复翻译；若正在限流等待，仍需等待结束。'
+      } catch (error) { this.testResult = error.message }
+      finally { this.busy = false }
     },
     async persist() {
       if (!this.ready) throw new Error('配置尚未加载，请刷新页面后重试。')

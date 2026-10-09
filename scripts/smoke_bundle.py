@@ -47,6 +47,10 @@ def smoke(binary: Path):
                 for asset in assets:
                     assert request(asset)
                 assert b'<svg' in request("/avatar.svg")
+                config = json.loads(request("/api/config"))
+                assert config["translation_provider"] == "google_web"
+                assert not config["translation_enabled"]
+                assert len(json.loads(request("/api/languages?provider=google_web"))["languages"]) == 8
                 request("/api/config", "PUT", {"target_language": "ja"})
                 persisted = json.loads((Path(directory) / "config.json").read_text("utf-8"))
                 assert persisted["target_language"] == "ja"
@@ -65,7 +69,7 @@ def smoke(binary: Path):
                         raise AssertionError("Bundled WebSocket did not deliver bilingual demo")
                 asyncio.run(check_socket())
                 request("/api/disconnect", "POST")
-                print("Bundle smoke test passed: assets, configuration, WebSocket, bilingual demo.")
+                print("Bundle smoke test passed: assets, Google defaults/languages, configuration, WebSocket, bilingual demo.")
             finally:
                 if sys.platform == "win32" and process.poll() is None:
                     # A onefile bundle has a bootloader parent and an application child.

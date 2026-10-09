@@ -2,7 +2,12 @@ import json
 import os
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+GOOGLE_LANGUAGES = [{"code": code, "name": name} for code, name in [
+    ("zh-Hans", "简体中文"), ("zh-Hant", "繁體中文"), ("en", "English"),
+    ("ja", "日本語"), ("ko", "한국어"), ("es", "Español"), ("fr", "Français"), ("de", "Deutsch"),
+]]
 
 
 class Style(BaseModel):
@@ -21,10 +26,17 @@ class Config(BaseModel):
     source_type: str = Field(default="auto", pattern=r"^(auto|video|chat)$")
     youtube_key: str = Field(default="", max_length=512, repr=False)
     translation_enabled: bool = False
+    translation_provider: str = Field(default="google_web", pattern=r"^(google_web|azure)$")
     azure_key: str = Field(default="", max_length=512, repr=False)
     azure_region: str = Field(default="", max_length=64, pattern=r"^[a-zA-Z0-9-]*$")
     target_language: str = Field(default="zh-Hans", pattern=r"^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$")
     style: Style = Field(default_factory=Style)
+
+    @model_validator(mode="after")
+    def normalize_target(self):
+        if self.translation_provider == "google_web" and self.target_language not in {item["code"] for item in GOOGLE_LANGUAGES}:
+            self.target_language = "zh-Hans"
+        return self
 
     def public(self):
         values = self.model_dump(exclude={"youtube_key", "azure_key"})
@@ -35,7 +47,12 @@ class Config(BaseModel):
 class ConfigStore:
     def __init__(self, path: Path):
         self.path = path
-        self.config = Config.model_validate_json(path.read_text("utf-8")) if path.exists() else Config()
+        if path.exists():
+            values = json.loads(path.read_text("utf-8"))
+            values.setdefault("translation_provider", "azure")
+            self.config = Config.model_validate(values)
+        else:
+            self.config = Config()
 
     def save(self, config: Config):
         self.path.parent.mkdir(parents=True, exist_ok=True)
