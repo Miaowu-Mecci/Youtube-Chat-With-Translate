@@ -180,18 +180,15 @@ class TranslationPool:
         self.is_current = is_current
 
     def discard_stale_jobs(self):
-        retained = []
-        while not self.queue.empty():
+        for _ in range(self.queue.qsize()):
             text = self.queue.get_nowait()
             ids = [mid for mid in self.pending.get(text, []) if self.is_current(mid)]
             if ids:
                 self.pending[text] = ids
-                retained.append(text)
+                self.queue.put_nowait(text)
             else:
                 self.pending.pop(text, None)
             self.queue.task_done()
-        for text in retained:
-            self.queue.put_nowait(text)
 
     def start(self):
         self.workers = [asyncio.create_task(self.worker()) for _ in range(self.concurrency)]
