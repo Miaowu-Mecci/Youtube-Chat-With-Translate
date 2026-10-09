@@ -75,7 +75,7 @@ async def test_language_change_cancels_old_jobs_and_keeps_one_stream():
             yield Batch([item()], 'token')
             await asyncio.Event().wait()
     async with httpx.AsyncClient(transport=httpx.MockTransport(response)) as client:
-        config = Config(source='CHAT', youtube_key='SECRET', translation_enabled=True, azure_key='SECRET', azure_region='eastasia', target_language='ja')
+        config = Config(source='CHAT', youtube_key='SECRET', translation_enabled=True, translation_provider='azure', azure_key='SECRET', azure_region='eastasia', target_language='ja')
         hub = ChatHub(config, Source(), client)
         await hub.connect()
         await asyncio.wait_for(request_started.wait(), 1)

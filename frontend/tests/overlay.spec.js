@@ -1,13 +1,17 @@
 import { test, expect } from '@playwright/test'
 
 const config = { source: '', source_type: 'auto', youtube_key: '', azure_key: '', azure_region: '',
-  target_language: 'zh-Hans', translation_enabled: false,
+  target_language: 'zh-Hans', translation_enabled: false, translation_provider: 'google_web',
   style: { font_size: 24, color: '#ffffff', translation_color: '#8de1cb', show_avatar: true, max_messages: 100, custom_css: '' } }
 
 test.beforeEach(async ({ request, page }) => {
   await request.post('/api/disconnect')
   await request.put('/api/config', { data: config })
-  await page.route('**/api/languages', route => route.fulfill({ json: { languages: [{ code: 'zh-Hans', name: '简体中文' }, { code: 'ja', name: '日本語' }] } }))
+  await page.route('**/api/languages*', route => {
+    const languages = [{ code: 'zh-Hans', name: '简体中文' }, { code: 'ja', name: '日本語' }]
+    if (new URL(route.request().url()).searchParams.get('provider') === 'azure') languages.push({ code: 'it', name: 'Italiano' })
+    return route.fulfill({ json: { languages } })
+  })
 })
 
 test('settings preview and standalone overlay share the demo', async ({ page, context }) => {
@@ -97,4 +101,51 @@ test('dashboard scrolls and stays usable on mobile', async ({ page }) => {
   await expect(page.getByRole('button', { name: '保存设置', exact: true })).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   expect(await page.evaluate(() => scrollY > 0)).toBe(true)
+})
+
+
+test('Google setup saves without keys and diagnostic displays mocked service results', async ({ page, request }) => {
+  let tested = false
+  await page.route('**/api/translation/test', async route => {
+    const saved = await (await request.get('/api/config')).json()
+    expect(saved.translation_provider).toBe('google_web')
+    expect(saved.translation_enabled).toBe(true)
+    expect(saved.azure_key_set).toBe(false)
+    tested = true
+    return route.fulfill({ json: { original: 'Hello', translation: '你好', source_language: 'en' } })
+  })
+  await page.goto('/')
+  await expect(page.locator('#provider')).toHaveValue('google_web')
+  await expect(page.locator('#azure-key')).toHaveCount(0)
+  await expect(page.locator('#translation')).toContainText('免账号、免 Key')
+  await page.getByRole('checkbox', { name: '开启翻译' }).check()
+  await page.getByRole('button', { name: '保存并测试翻译' }).click()
+  await expect(page.getByRole('status', { name: '翻译测试结果' })).toContainText('Hello → 你好')
+  expect(tested).toBe(true)
+  await expect(page.locator('.status-pill')).toHaveText('未连接')
+  await page.route('**/api/translation/test', route => route.fulfill({ status: 503, json: { code: 'cooldown', detail: 'Google 正在限流等待中，请稍后测试。' } }))
+  await page.getByRole('button', { name: '保存并测试翻译' }).click()
+  await expect(page.getByRole('status', { name: '翻译测试结果' })).toContainText('限流等待')
+})
+
+test('switching services preserves Azure credentials and resets unsupported language', async ({ page, request }) => {
+  await page.goto('/')
+  await page.locator('#provider').selectOption('azure')
+  await expect(page.locator('#azure-key')).toBeVisible()
+  await page.locator('#azure-key').fill('MOCK_AZURE_KEY')
+  await page.locator('#region').fill('eastasia')
+  await page.locator('#language').selectOption('it')
+  await page.getByRole('button', { name: '保存设置', exact: true }).click()
+  await expect(page.getByRole('status')).toContainText('设置已保存')
+  await page.locator('#provider').selectOption('google_web')
+  await expect(page.locator('#azure-key')).toHaveCount(0)
+  await expect(page.locator('#language')).toHaveValue('zh-Hans')
+  await expect(page.locator('#translation')).toContainText('不支持原目标语言')
+  await page.getByRole('button', { name: '保存设置', exact: true }).click()
+  await expect.poll(async () => (await (await request.get('/api/config')).json()).translation_provider).toBe('google_web')
+  const saved = await (await request.get('/api/config')).json()
+  expect(saved.azure_key_set).toBe(true)
+  expect(saved.azure_region).toBe('eastasia')
+  await page.locator('#provider').selectOption('azure')
+  await expect(page.locator('#azure-key')).toHaveAttribute('placeholder', '留空保留已保存的 Key')
 })

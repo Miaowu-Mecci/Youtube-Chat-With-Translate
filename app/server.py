@@ -11,10 +11,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from .config import Config, ConfigStore
+from .config import Config, ConfigStore, GOOGLE_LANGUAGES
 from .hub import ChatHub
 from .paths import data_directory, resource_root
 from .youtube import YouTubeSource
+from .translation import TranslationError
 
 ROOT = resource_root()
 FALLBACK_LANGUAGES = [{"code": code, "name": name} for code, name in [
@@ -103,8 +104,36 @@ def create_app(config_path: Path | None = None, source_factory=YouTubeSource):
         await app.state.hub.connect(demo=True)
         return app.state.hub.status
 
+    @app.post("/api/translation/test")
+    async def test_translation():
+        try:
+            return await app.state.hub.test_translation()
+        except TranslationError as error:
+            messages = {
+                "busy": "翻译请求正在进行，请稍后测试。",
+                "missing_credentials": "请填写 Azure Key 和资源区域。",
+                "credentials_or_quota": "Azure 鉴权或额度错误，请检查 Key、区域和 F0 额度。",
+                "rate_limited": "翻译服务限流；Google 将等待 60 秒，请稍后测试。",
+                "cooldown": "Google 正在限流等待中，请稍后测试。",
+                "paused": app.state.hub.google.pause_message,
+                "blocked": "Google 拒绝访问或要求验证码，已暂停；请检查网络后恢复翻译。",
+                "invalid_response": "Google 接口响应格式变化，已暂停；请等待更新或切换 Azure。",
+                "stale": "配置或连接已改变，本次测试已取消，请重新测试。",
+            }
+            return JSONResponse({"code": error.code, "detail": messages.get(error.code, "翻译超时或服务暂不可用，请检查网络。")},
+                                status_code=409 if error.code in {"busy", "stale"} else 503)
+
+    @app.post("/api/translation/resume")
+    async def resume_translation():
+        return await app.state.hub.resume_translation()
+
     @app.get("/api/languages")
-    async def languages():
+    async def languages(provider: str | None = None):
+        selected = provider or store.config.translation_provider
+        if selected == "google_web":
+            return {"languages": GOOGLE_LANGUAGES, "cached": True}
+        if selected != "azure":
+            return JSONResponse({"detail": "未知翻译服务。"}, status_code=422)
         if app.state.languages:
             return {"languages": app.state.languages, "cached": True}
         try:

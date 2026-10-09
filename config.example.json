@@ -3,6 +3,7 @@
   "source_type": "auto",
   "youtube_key": "",
   "translation_enabled": false,
+  "translation_provider": "google_web",
   "azure_key": "",
   "azure_region": "eastasia",
   "target_language": "zh-Hans",
