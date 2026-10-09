@@ -1,0 +1,100 @@
+import { test, expect } from '@playwright/test'
+
+const config = { source: '', source_type: 'auto', youtube_key: '', azure_key: '', azure_region: '',
+  target_language: 'zh-Hans', translation_enabled: false,
+  style: { font_size: 24, color: '#ffffff', translation_color: '#8de1cb', show_avatar: true, max_messages: 100, custom_css: '' } }
+
+test.beforeEach(async ({ request, page }) => {
+  await request.post('/api/disconnect')
+  await request.put('/api/config', { data: config })
+  await page.route('**/api/languages', route => route.fulfill({ json: { languages: [{ code: 'zh-Hans', name: '简体中文' }, { code: 'ja', name: '日本語' }] } }))
+})
+
+test('settings preview and standalone overlay share the demo', async ({ page, context }) => {
+  const errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: '让每一句话，都被听懂。' })).toBeVisible()
+  await page.getByRole('button', { name: '体验演示' }).click()
+  const preview = page.frameLocator('iframe')
+  const first = preview.locator('[data-message-id="demo-0"]')
+  await expect(first.locator('#message')).toContainText('こんにちは')
+  await expect(first.locator('.translation')).toContainText('你好！')
+  await expect(first).toHaveCount(1)
+  await expect(page.locator('.status-pill')).toHaveText('演示中')
+  const overlay = await context.newPage()
+  await overlay.goto('/overlay')
+  await expect(overlay.locator('[data-message-id="demo-0"] .translation')).toContainText('你好！')
+  expect(await overlay.locator('body').evaluate(el => getComputedStyle(el).backgroundColor)).toBe('rgba(0, 0, 0, 0)')
+  expect(await overlay.locator('yt-live-chat-renderer').evaluate(el => getComputedStyle(el).backgroundColor)).toBe('rgba(0, 0, 0, 0)')
+  await page.screenshot({ path: 'test-results/dashboard.png', fullPage: true })
+  await overlay.close()
+  expect(errors).toEqual([])
+})
+
+test('draft styles update preview and saved styles update OBS', async ({ page, request }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: '体验演示' }).click()
+  const preview = page.frameLocator('iframe')
+  await expect(preview.locator('.translation').first()).toBeVisible()
+  await page.locator('#custom-css').fill('yt-live-chat-text-message-renderer { border-left: 3px solid rgb(255, 0, 0); }\n.translation { color: rgb(0, 255, 0); font-weight: 600; }\nyt-live-chat-author-chip #author-name { color: rgb(255, 200, 0); }')
+  await expect(preview.locator('.translation').first()).toHaveCSS('color', 'rgb(0, 255, 0)')
+  await expect(preview.locator('yt-live-chat-text-message-renderer').first()).toHaveCSS('border-left-width', '3px')
+  await expect(preview.locator('#author-name').first()).toHaveCSS('color', 'rgb(255, 200, 0)')
+  await page.getByRole('checkbox', { name: '显示头像' }).uncheck()
+  await expect(preview.locator('#author-photo').first()).toHaveCSS('display', 'none')
+  await page.getByRole('button', { name: '保存设置', exact: true }).click()
+  await expect(page.getByRole('status')).toContainText('设置已保存')
+  expect((await (await request.get('/api/config')).json()).style.show_avatar).toBe(false)
+  await page.goto('/overlay')
+  await expect(page.locator('.translation').first()).toHaveCSS('color', 'rgb(0, 255, 0)')
+})
+
+test('translation events update existing rows and deleted rows stay deleted', async ({ page }) => {
+  let socket
+  await page.routeWebSocket('**/ws', ws => {
+    socket = ws
+    ws.send(JSON.stringify({ type: 'snapshot', session: 'test', messages: [], config, status: {} }))
+  })
+  await page.goto('/overlay')
+  await expect.poll(() => Boolean(socket)).toBe(true)
+  const message = { id: 'one', author: 'Alice', original: 'Hello', avatar: '', role: 'normal', time: new Date().toISOString(), translation: '' }
+  const send = event => socket.send(JSON.stringify({ session: 'test', ...event }))
+  send({ type: 'message', message })
+  await expect(page.locator('#message')).toHaveText('Hello')
+  send({ type: 'translation', id: 'one', translation: '你好' })
+  await expect(page.locator('.translation')).toHaveText('你好')
+  await expect(page.locator('yt-live-chat-text-message-renderer')).toHaveCount(1)
+  const positions = await page.locator('[data-message-id="one"]').evaluate(el => ({ original: el.querySelector('#message').getBoundingClientRect().top, translation: el.querySelector('.translation').getBoundingClientRect().top }))
+  expect(positions.translation).toBeLessThan(positions.original)
+  send({ type: 'delete', ids: ['one'] })
+  await expect(page.locator('yt-live-chat-text-message-renderer')).toHaveCount(0)
+  send({ type: 'translation', id: 'one', translation: '迟到的译文' })
+  await expect(page.locator('yt-live-chat-text-message-renderer')).toHaveCount(0)
+})
+
+test('chat HTML is displayed as text and does not execute', async ({ page }) => {
+  let socket
+  let dialogs = 0
+  page.on('dialog', dialog => { dialogs++; dialog.dismiss() })
+  await page.routeWebSocket('**/ws', ws => {
+    socket = ws
+    ws.send(JSON.stringify({ type: 'snapshot', session: 'test', messages: [], config, status: {} }))
+  })
+  await page.goto('/overlay')
+  await expect.poll(() => Boolean(socket)).toBe(true)
+  const text = '<img src=x onerror=alert(1)><script>alert(1)</script>'
+  socket.send(JSON.stringify({ type: 'message', session: 'test', message: { id: 'safe', author: '<script>Alice</script>', original: text, avatar: '', time: new Date().toISOString(), role: 'normal', translation: '' } }))
+  await expect(page.locator('#message')).toHaveText(text)
+  expect(await page.locator('#message img, #message script').count()).toBe(0)
+  expect(dialogs).toBe(0)
+})
+
+test('dashboard scrolls and stays usable on mobile', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/')
+  await page.locator('#appearance').scrollIntoViewIfNeeded()
+  await expect(page.getByRole('button', { name: '保存设置', exact: true })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  expect(await page.evaluate(() => scrollY > 0)).toBe(true)
+})

@@ -1,0 +1,22 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/
+frontend/node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+*.egg-info/
+.DS_Store
+/build/
+/dist/
+# Local environment metadata and credentials must not enter a public repository.
+/.aws/
+/.codex/
+/.agents/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
