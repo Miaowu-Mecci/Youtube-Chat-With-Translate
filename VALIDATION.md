@@ -81,3 +81,4 @@
 - Python **95 项通过**。新测试覆盖 500 条历史消息仅一条连接后新消息进入翻译、解析直播间期间的新消息、自动重连、重复点击、手动新连接、微秒精度、时区、缺失 / 无效时间和控制事件。
 - Chromium **10 项通过**，验证点击时间先于配置保存，以及已过滤历史数量提示；连续译文显示和其余回归保留。前端生产构建通过。
 - Windows 冒烟脚本增加无 Key 的新连接请求验证（起点与过滤计数），随后继续验证双语演示；不调用外部服务。真实 YouTube 与 Windows OBS 人工验证仍待进行。
+- [Windows 新消息过滤版 CI](https://github.com/Miaowu-Mecci/Youtube-Chat-With-Translate/actions/runs/37922670208) 已通过 95 项后端回归、构建与实际启动检查（包含点击时间接口）；产物校验和及 ZIP 完整性通过。独立 `YouTubeOBSChat-NewMessagesOnly.exe` 已作为 v0.1.1 新增附件上传，旧附件保留。
