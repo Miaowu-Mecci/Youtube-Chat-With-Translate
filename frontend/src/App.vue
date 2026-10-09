@@ -116,7 +116,10 @@ export default {
         if (provider !== this.form.translation_provider) return
         this.languages = data.languages
         this.languageNotice = data.message || ''
-        if (!this.languages.some(item => item.code === this.form.target_language)) {
+        if (!this.languages.some(item => item.code === this.form.target_language) && provider === 'azure' && data.fallback) {
+          // A partial fallback list cannot establish that an existing Azure target is unsupported.
+          this.languages.push({ code: this.form.target_language, name: this.form.target_language })
+        } else if (!this.languages.some(item => item.code === this.form.target_language)) {
           this.form.target_language = 'zh-Hans'
           this.languageNotice = '当前服务不支持原目标语言，已改为简体中文；请保存设置。'
         }

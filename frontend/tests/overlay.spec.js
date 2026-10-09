@@ -149,3 +149,16 @@ test('switching services preserves Azure credentials and resets unsupported lang
   await page.locator('#provider').selectOption('azure')
   await expect(page.locator('#azure-key')).toHaveAttribute('placeholder', '留空保留已保存的 Key')
 })
+
+
+test('Azure language lookup failure preserves an existing target on upgrade', async ({ page, request }) => {
+  await request.put('/api/config', { data: { translation_provider: 'azure', target_language: 'it' } })
+  await page.route('**/api/languages*', route => route.fulfill({ json: {
+    languages: [{ code: 'zh-Hans', name: '简体中文' }], fallback: true, message: '语言列表暂不可用。'
+  } }))
+  await page.goto('/')
+  await expect(page.locator('#language')).toHaveValue('it')
+  await page.getByRole('button', { name: '保存设置', exact: true }).click()
+  await expect(page.getByRole('status')).toContainText('设置已保存')
+  expect((await (await request.get('/api/config')).json()).target_language).toBe('it')
+})
