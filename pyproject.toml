@@ -1,6 +1,6 @@
 [project]
 name = "youtube-obs-bilingual-chat"
-version = "0.1.0"
+version = "0.1.1"
 description = "Local YouTube live chat overlay with bilingual translation for OBS"
 requires-python = ">=3.11"
 dependencies = [
