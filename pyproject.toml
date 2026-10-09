@@ -4,7 +4,7 @@ version = "0.1.1"
 description = "Local YouTube live chat overlay with bilingual translation for OBS"
 requires-python = ">=3.11"
 dependencies = [
-  "fastapi>=0.115,<1", "uvicorn>=0.34,<1", "httpx>=0.28,<1",
+  "fastapi>=0.115,<1", "uvicorn>=0.34,<1", "httpx>=0.28,<1", "curl-cffi==0.16.3",
   "grpcio>=1.78,<2", "protobuf>=6.33.5,<7", "websockets>=14,<17"
 ]
 

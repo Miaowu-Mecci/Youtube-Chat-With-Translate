@@ -10,7 +10,7 @@ from .youtube import SourceError, map_item
 
 
 class ChatHub:
-    def __init__(self, config: Config, source, http_client):
+    def __init__(self, config: Config, source, http_client, google_client=None):
         self.config, self.source, self.http_client = config, source, http_client
         self.clients: set[asyncio.Queue] = set()
         self.messages: OrderedDict[str, dict] = OrderedDict()
@@ -20,7 +20,7 @@ class ChatHub:
                        "translation": "off", "translation_message": "翻译未开启。"}
         self.task = None
         self.pool = None
-        self.google = GoogleWebTranslator(http_client, self.google_state)
+        self.google = GoogleWebTranslator(google_client if google_client is not None else http_client, self.google_state)
         self.test_task = None
         self.mode = "idle"
         self.session = uuid4().hex

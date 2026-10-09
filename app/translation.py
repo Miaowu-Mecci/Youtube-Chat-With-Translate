@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 import httpx
+from curl_cffi.requests.exceptions import RequestException
 
 
 class TranslationError(Exception):
@@ -130,7 +131,7 @@ class GoogleWebTranslator:
                     params={"client": "gtx", "sl": "auto", "tl": GOOGLE_CODES[target],
                             "dt": "t", "q": text}, timeout=5,
                 ), 5)
-            except (httpx.HTTPError, TimeoutError):
+            except (httpx.HTTPError, RequestException, TimeoutError):
                 raise TranslationError("unavailable") from None
             if response.status_code == 429:
                 raise TranslationError("rate_limited")

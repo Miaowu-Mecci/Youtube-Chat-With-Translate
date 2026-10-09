@@ -4,6 +4,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
+from curl_cffi import AsyncSession
 from fastapi import FastAPI, Request, WebSocket
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
@@ -36,9 +37,9 @@ def create_app(config_path: Path | None = None, source_factory=YouTubeSource):
 
     @asynccontextmanager
     async def lifespan(app):
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient() as client, AsyncSession() as google_client:
             app.state.client = client
-            app.state.hub = ChatHub(store.config, source_factory(client), client)
+            app.state.hub = ChatHub(store.config, source_factory(client), client, google_client=google_client)
             app.state.languages = None
             yield
             await app.state.hub.stop()

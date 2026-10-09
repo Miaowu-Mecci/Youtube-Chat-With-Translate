@@ -1,7 +1,7 @@
 # Build on the target OS. Never bundle data/config.json or other user credentials.
 import os
 from pathlib import Path
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 root = Path(SPECPATH)
 mode = os.environ.get("YTCHAT_BUNDLE_MODE", "onefile")
@@ -17,9 +17,10 @@ datas = [
     (str(root / "LICENSE"), "."),
     (str(root / "THIRD_PARTY_NOTICES.md"), "."),
 ]
+curl_datas, curl_binaries, curl_imports = collect_all("curl_cffi")
 a = Analysis(
-    [str(root / "main.py")], pathex=[str(root)], binaries=[], datas=datas,
-    hiddenimports=collect_submodules("uvicorn") + ["grpc._cython.cygrpc"],
+    [str(root / "main.py")], pathex=[str(root)], binaries=curl_binaries, datas=datas + curl_datas,
+    hiddenimports=collect_submodules("uvicorn") + curl_imports + ["grpc._cython.cygrpc", "_cffi_backend"],
     hookspath=[], hooksconfig={}, runtime_hooks=[],
     excludes=["pytest", "grpc_tools", "tkinter"], noarchive=False,
 )
