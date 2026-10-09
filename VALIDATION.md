@@ -58,4 +58,5 @@
 - Google 生产请求改用独立的 curl_cffi 异步 libcurl 会话；不启用浏览器指纹模拟、不做 429 后的客户端回退；保留单并发、1 秒间隔、60 秒冷却、连续三次限流暂停及请求超时。Azure / YouTube 继续使用原客户端。
 - 真实应用 `POST /api/translation/test` 返回 200，固定样例译文「您好，欢迎来到直播！」；真实弹幕翻译队列产生同一消息 ID 的 `translation_status=complete` 事件，译文「大家晚上好！」。这些验证未接入真实 YouTube 直播。
 - Python **88 项通过**、Chromium **8 项通过**；新增 libcurl 网络错误脱敏与 worker 存活回归，并验证生产应用使用独立 libcurl 会话。浏览器测试验证译文原位显示，外部翻译结果仍使用模拟。
-- PyInstaller 收集 curl_cffi 原生库与 CFFI 依赖；Windows EXE 由手动 CI 构建并执行实际启动检查。本次修复不修改已发布的 v0.1.1 附件。
+- Linux 单文件 PyInstaller 产物通过启动冒烟测试，且实际调用 Google 返回 200 和「您好，欢迎来到直播！」，验证冻结后的原生库与证书资源。
+- PyInstaller 收集 curl_cffi 原生库与 CFFI 依赖；[Windows 修复版 CI](https://github.com/Miaowu-Mecci/Youtube-Chat-With-Translate/actions/runs/37919579990) 已通过 88 项回归、EXE 构建和实际启动冒烟测试。本次修复不修改已发布的 v0.1.1 附件；Windows 用户网络中的真实 Google 翻译与 OBS 人工验证仍需进行。
