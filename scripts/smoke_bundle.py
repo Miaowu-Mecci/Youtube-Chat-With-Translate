@@ -49,13 +49,17 @@ def smoke(binary: Path):
                     assert request(asset)
                 assert b'<svg' in request("/avatar.svg")
                 config = json.loads(request("/api/config"))
+                assert config["youtube_provider"] == "web"
                 assert config["translation_provider"] == "google_web"
                 assert not config["translation_enabled"]
                 assert len(json.loads(request("/api/languages?provider=google_web"))["languages"]) == 8
                 request("/api/config", "PUT", {"target_language": "ja"})
                 persisted = json.loads((Path(directory) / "config.json").read_text("utf-8"))
                 assert persisted["target_language"] == "ja"
-                request("/api/config", "PUT", {"target_language": "zh-Hans"})
+                assert persisted["target_languages"] == ["ja"]
+                request("/api/config", "PUT", {"target_languages": ["zh-Hans", "en"]})
+                persisted = json.loads((Path(directory) / "config.json").read_text("utf-8"))
+                assert persisted["target_languages"] == ["zh-Hans", "en"]
                 clicked_at = datetime.now(timezone.utc).isoformat()
                 # No YouTube key: exercise the packaged API without external requests.
                 connection = json.loads(request("/api/connect", "POST", {"started_at": clicked_at}))
@@ -68,14 +72,27 @@ def smoke(binary: Path):
                         deadline = time.monotonic() + 10
                         while time.monotonic() < deadline:
                             event = json.loads(await asyncio.wait_for(ws.recv(), 5))
-                            if event["type"] == "translation" and event.get("translation"):
-                                return
-                            if event["type"] == "snapshot" and any(m["translation"] for m in event["messages"]):
-                                return
-                        raise AssertionError("Bundled WebSocket did not deliver bilingual demo")
-                asyncio.run(check_socket())
+                            candidates = event.get("messages", []) if event["type"] == "snapshot" else (
+                                [event] if event["type"] == "translation" else [])
+                            for message in candidates:
+                                rows = message.get("translations", [])
+                                if len(rows) == 2 and all(row["status"] == "complete" for row in rows):
+                                    assert [row["language"] for row in rows] == ["zh-Hans", "en"]
+                                    assert all(row["text"] for row in rows)
+                                    return message["id"]
+                        raise AssertionError("Bundled WebSocket did not deliver multilingual demo")
+                mid = asyncio.run(check_socket())
+                request("/api/config", "PUT", {"target_languages": ["en", "zh-Hans"]})
+
+                async def check_reordered_snapshot():
+                    async with websockets.connect(f"ws://127.0.0.1:{port}/ws", proxy=None) as ws:
+                        snapshot = json.loads(await asyncio.wait_for(ws.recv(), 5))
+                        message = next(message for message in snapshot["messages"] if message["id"] == mid)
+                        assert [row["language"] for row in message["translations"]] == ["en", "zh-Hans"]
+                        assert all(row["status"] == "complete" and row["text"] for row in message["translations"])
+                asyncio.run(check_reordered_snapshot())
                 request("/api/disconnect", "POST")
-                print("Bundle smoke test passed: assets, Google defaults/languages, configuration, WebSocket, bilingual demo.")
+                print("Bundle smoke test passed: assets, free-chat/Google defaults, configuration, multilingual demo and language reordering.")
             finally:
                 if sys.platform == "win32" and process.poll() is None:
                     # A onefile bundle has a bootloader parent and an application child.

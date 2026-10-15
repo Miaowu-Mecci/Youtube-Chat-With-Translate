@@ -23,7 +23,7 @@
 
 **下载已发布版本**：在仓库的 Releases 页面下载 `YouTubeOBSChat-Windows-x64.zip`，解压后运行其中的 `YouTubeOBSChat.exe`；压缩包包含使用文档和第三方许可证。也提供单独的 EXE 和 `SHA256SUMS.txt` 校验文件。
 
-**v0.1.1 补充修复版**：建议直接下载 [YouTubeOBSChat-NewMessagesOnly.exe](https://github.com/Miaowu-Mecci/Youtube-Chat-With-Translate/releases/download/v0.1.1/YouTubeOBSChat-NewMessagesOnly.exe)，包含 Google 请求客户端、连续翻译队列修复以及仅接收连接后新弹幕功能。关闭旧程序后运行新文件，并刷新设置页与 OBS 浏览器源；原始 v0.1.1 的 EXE / ZIP 和先前补充文件 `GoogleFix.exe` / `TranslationFix.exe` 不包含本次历史弹幕过滤。
+**v0.2.0 多语言版**：在 Releases 下载 `YouTubeOBSChat-Windows-x64.zip` 或 `YouTubeOBSChat.exe`。新增免费网页抓取及可排序的多语言翻译，包含此前的 Google 请求客户端、连续翻译队列和新弹幕过滤修复。退出旧程序后替换 EXE，并刷新设置页与 OBS 浏览器源。
 
 **GitHub 构建**：在 Actions 中选择 **Build Windows EXE → Run workflow**，构建通过后下载 `YouTubeOBSChat-Windows-x64` artifact。推送 `v*` 版本标签时，CI 在 Windows x64 上运行自动测试、生成 EXE 并实际启动验证，全部通过后自动创建 Release 并上传 EXE、发行压缩包及 SHA-256 校验文件；手动构建仅生成 artifact。
 
@@ -42,7 +42,7 @@ Windows EXE 必须由 Windows 本机构建或 Actions Windows runner 生成；�
 
 ## 免费抓取与多语言翻译
 
-新增功能需要运行本次源码，或重新构建 Windows EXE；已有 v0.1.1 Release 二进制不包含这些源码更新。
+新增功能自 v0.2.0 起提供。请下载 v0.2.0 或更新版本，或运行本次源码；已有 v0.1.1 Release 二进制不包含这些更新。
 
 默认使用 **免费网页抓取**，接受公开正在直播的视频链接或 11 位视频 ID。它读取 YouTube 网页的聊天续传接口，共享同一条上游连接、按网页给出的间隔轮询，保留消息去重、历史过滤、删除和作者封禁处理。无需用户账号或 API Key，不占用用户的 YouTube Data API 配额。
 

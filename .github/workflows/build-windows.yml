@@ -57,5 +57,5 @@ jobs:
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          gh release create $env:RELEASE_TAG release-assets/YouTubeOBSChat.exe release-assets/YouTubeOBSChat-Windows-x64.zip release-assets/SHA256SUMS.txt --verify-tag --title "YouTube OBS 双语弹幕 $env:RELEASE_TAG" --notes-file RELEASE_NOTES.md
+          gh release create $env:RELEASE_TAG release-assets/YouTubeOBSChat.exe release-assets/YouTubeOBSChat-Windows-x64.zip release-assets/SHA256SUMS.txt --verify-tag --title "YouTube OBS 多语言弹幕 $env:RELEASE_TAG" --notes-file RELEASE_NOTES.md
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
