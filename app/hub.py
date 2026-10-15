@@ -9,6 +9,16 @@ from .translation import AzureTranslator, GoogleWebTranslator, TranslationError,
 from .youtube import SourceError, map_item
 
 
+DEMO_SAMPLES = [
+    ("Mika", "こんにちは！配信楽しみにしていました 🌸", "你好！一直很期待这次直播 🌸", "ja"),
+    ("Alex", "Hello from London! Love this stream 💚", "来自伦敦的问候！好喜欢这场直播 💚", "en"),
+    ("小雨", "晚上好，今天也要加油呀！", "晚上好，今天也要加油呀！", "zh-Hans"),
+    ("Sofia", "¡Qué bonito! Gracias por compartir ✨", "太漂亮了！谢谢分享 ✨", "es"),
+    ("Min", "오늘 방송 정말 재밌어요!", "今天的直播真的很有趣！", "ko"),
+    ("测试观众", "<script>alert('文本安全测试')</script>", "<script>alert('文本安全测试')</script>", "zh-Hans"),
+]
+
+
 class ChatHub:
     def __init__(self, config: Config, source, http_client, google_client=None):
         self.config, self.source, self.http_client = config, source, http_client
@@ -72,17 +82,30 @@ class ChatHub:
         self.status.update(translation=state, translation_message=message)
         self.publish_progress()
 
-    def translated(self, mid: str, result: Result | None, status: str):
+    def translation_rows(self, status="pending"):
+        return [{"language": code, "text": "", "status": status} for code in self.config.target_languages]
+
+    def translated(self, mid: str, result: Result | None, status: str, target: str | None = None):
         message = self.messages.get(mid)
         if message is None:
             return
-        fields = {"translation_status": status, "translation": "", "source_language": ""}
-        if result:
-            fields["source_language"] = result.language
-            # Chinese script variants are distinct targets; English region variants share a language.
-            same_language = result.language.lower() == self.config.target_language.lower()
-            if not same_language and result.text.strip() != message["original"].strip():
-                fields["translation"] = result.text
+        target = target or self.config.target_language
+        rows = message.setdefault("translations", self.translation_rows())
+        for row in rows:
+            if row["language"] == target:
+                row.update(text=result.text if result else "", status=status, source_language=result.language if result else "")
+        states = [row["status"] for row in rows]
+        overall = ("pending" if "pending" in states else "failed" if "failed" in states
+                   else "complete" if all(state == "complete" for state in states) else "skipped")
+        # Retain the legacy field for integrations using the original single-language API.
+        first = rows[0] if rows else {}
+        legacy = first.get("text", "")
+        if (first.get("source_language", "").lower() == self.config.target_language.lower()
+                or legacy.strip() == message["original"].strip()):
+            legacy = ""
+        fields = {"translation_status": overall, "translation": legacy,
+                  "source_language": result.language if result else message.get("source_language", ""),
+                  "translations": rows}
         message.update(fields)
         self.publish({"type": "translation", "id": mid, **fields})
         self.publish_progress()
@@ -111,12 +134,21 @@ class ChatHub:
             if isinstance(provider, GoogleWebTranslator) and provider.lock.locked():
                 raise TranslationError("busy")
             sample = "你好，欢迎观看直播！" if target == "en" else "Hello, welcome to the stream!"
-            self.test_task = asyncio.create_task(provider.translate(sample, target))
+            async def translate_samples():
+                rows = []
+                for language in self.config.target_languages:
+                    original = "你好，欢迎观看直播！" if language == "en" else "Hello, welcome to the stream!"
+                    result = await provider.translate(original, language)
+                    rows.append({"language": language, "text": result.text,
+                                 "original": original, "source_language": result.language})
+                return rows
+            self.test_task = asyncio.create_task(translate_samples())
             task = self.test_task
         try:
-            result = await task
+            rows = await task
             return {"provider": self.config.translation_provider, "target_language": target,
-                    "original": sample, "translation": result.text, "source_language": result.language}
+                    "original": sample, "translation": rows[0]["text"],
+                    "source_language": rows[0]["source_language"], "translations": rows}
         except asyncio.CancelledError:
             raise TranslationError("stale") from None
         except TranslationError as error:
@@ -135,9 +167,11 @@ class ChatHub:
                     # Explicit recovery must restore jobs cancelled by setup_translation.
                     for message in self.messages.values():
                         if message["translation_status"] != "complete":
-                            state = self.pool.submit(message["id"], message["original"])
-                            if state != "complete":
-                                self.translated(message["id"], None, state)
+                            for row in message.get("translations", []):
+                                if row["status"] != "complete":
+                                    state = self.pool.submit_target(message["id"], message["original"], row["language"])
+                                    if state != "complete":
+                                        self.translated(message["id"], None, state, row["language"])
                 else:
                     self.mark_pending_failed()
             self.publish_progress()
@@ -155,7 +189,7 @@ class ChatHub:
             self.translation_state("paused", "请填写 Azure Key 和区域；当前仅显示原文。")
         else:
             self.pool = TranslationPool(
-                self.provider(), self.config.target_language, self.translated, self.translation_state,
+                self.provider(), self.config.target_languages, self.translated, self.translation_state,
                 concurrency=1 if self.config.translation_provider == "google_web" else 4,
                 is_current=lambda mid: mid in self.messages,
             )
@@ -186,7 +220,9 @@ class ChatHub:
     def mark_pending_failed(self):
         for mid, message in self.messages.items():
             if message["translation_status"] == "pending":
-                self.translated(mid, None, "failed")
+                for row in message.get("translations", []):
+                    if row["status"] == "pending":
+                        self.translated(mid, None, "failed", row["language"])
 
     async def connect(self, demo: bool = False, started_at: datetime | None = None):
         requested_at = datetime.now(timezone.utc)
@@ -214,9 +250,12 @@ class ChatHub:
     async def configure(self, config: Config):
         async with self.lock:
             old = self.config
-            source_changed = any(getattr(old, key) != getattr(config, key) for key in ("source", "source_type", "youtube_key"))
+            source_changed = any(getattr(old, key) != getattr(config, key) for key in ("source", "source_type", "youtube_key", "youtube_provider"))
             translation_changed = any(getattr(old, key) != getattr(config, key) for key in (
-                "translation_provider", "target_language", "translation_enabled", "azure_key", "azure_region"))
+                "translation_provider", "target_language", "target_languages", "translation_enabled", "azure_key", "azure_region"))
+            order_only = (translation_changed and set(old.target_languages) == set(config.target_languages)
+                          and all(getattr(old, key) == getattr(config, key) for key in (
+                              "translation_provider", "translation_enabled", "azure_key", "azure_region")))
             if source_changed or translation_changed:
                 await self.cancel_translation_test()
             if source_changed:
@@ -232,18 +271,30 @@ class ChatHub:
             self.config = config
             while len(self.messages) > config.style.max_messages:
                 self.messages.popitem(last=False)
-            if source_changed or translation_changed:
+            if order_only and not source_changed:
+                if self.pool:
+                    self.pool.target = config.target_languages
+                for message in self.messages.values():
+                    rows = {row["language"]: row for row in message.get("translations", [])}
+                    message["translations"] = [rows[code] for code in config.target_languages if code in rows]
+                    message["translation"] = message["translations"][0]["text"] if message["translations"] else ""
+            elif source_changed or translation_changed:
                 # Cancel all old work before starting any new-language work.
                 if self.pool:
                     await self.pool.close()
                     self.pool = None
                 for message in self.messages.values():
-                    message.update(translation="", source_language="", translation_status="skipped")
+                    message.update(translation="", translations=(self.translation_rows("skipped")
+                                   if config.translation_enabled or self.mode == "demo" else []),
+                                   source_language="", translation_status="skipped")
                 if self.mode != "idle":
                     await self.setup_translation()
                     if self.pool:
                         for message in self.messages.values():
                             message["translation_status"] = self.pool.submit(message["id"], message["original"])
+                    elif self.mode == "demo":
+                        for mid in self.messages:
+                            self.translate_demo(mid)
                 else:
                     self.translation_state("off", "连接后启动翻译。")
             self.publish(self.snapshot())
@@ -260,6 +311,7 @@ class ChatHub:
         if mid in self.seen or mid in self.deleted:
             return
         self.remember(self.seen, mid)
+        message.setdefault("translations", self.translation_rows() if self.pool or self.mode == "demo" else [])
         self.messages[mid] = message
         while len(self.messages) > self.config.style.max_messages:
             self.messages.popitem(last=False)
@@ -272,7 +324,7 @@ class ChatHub:
             if state != "pending":
                 message["translation_status"] = state
                 self.publish({"type": "translation", "id": mid, "translation": message["translation"],
-                              "source_language": message["source_language"], "translation_status": state})
+                              "source_language": message["source_language"], "translations": message["translations"], "translation_status": state})
         self.publish_progress()
 
     def delete(self, ids: list[str]):
@@ -315,14 +367,15 @@ class ChatHub:
     async def run_live(self):
         token, failures = "", 0
         try:
-            if not self.config.youtube_key:
+            key = self.config.youtube_key if self.config.youtube_provider == "api" else ""
+            if self.config.youtube_provider == "api" and not key:
                 raise SourceError("credentials", "请先填写 YouTube API Key。")
-            chat_id = await self.source.resolve(self.config.source, self.config.source_type, self.config.youtube_key)
+            chat_id = await self.source.resolve(self.config.source, self.config.source_type, key)
             while True:
                 ended = False
                 received = False
                 try:
-                    async for batch in self.source.stream(chat_id, self.config.youtube_key, token):
+                    async for batch in self.source.stream(chat_id, key, token):
                         received = True
                         failures = 0
                         token = batch.token or token
@@ -360,28 +413,27 @@ class ChatHub:
                 self.translation_state("off", "直播连接已停止，翻译已停止。")
             self.mark_pending_failed()
 
+    def translate_demo(self, mid):
+        index = int(mid.split("-")[-1]) % len(DEMO_SAMPLES)
+        _, original, chinese, language = DEMO_SAMPLES[index]
+        english = ["Hello! I've been looking forward to this stream 🌸",
+                   "Hello from London! Love this stream 💚", "Good evening, keep it up today!",
+                   "How beautiful! Thanks for sharing ✨", "Today's stream is really fun!", original][index]
+        for target in self.config.target_languages:
+            fixed = {"zh-Hans": chinese, "en": english}.get(target)
+            self.translated(mid, Result(fixed, language) if fixed else None,
+                            "complete" if fixed else "skipped", target)
+
     async def run_demo(self):
-        samples = [
-            ("Mika", "こんにちは！配信楽しみにしていました 🌸", "你好！一直很期待这次直播 🌸", "ja"),
-            ("Alex", "Hello from London! Love this stream 💚", "来自伦敦的问候！好喜欢这场直播 💚", "en"),
-            ("小雨", "晚上好，今天也要加油呀！", "晚上好，今天也要加油呀！", "zh-Hans"),
-            ("Sofia", "¡Qué bonito! Gracias por compartir ✨", "太漂亮了！谢谢分享 ✨", "es"),
-            ("Min", "오늘 방송 정말 재밌어요!", "今天的直播真的很有趣！", "ko"),
-            ("测试观众", "<script>alert('文本安全测试')</script>", "<script>alert('文本安全测试')</script>", "zh-Hans"),
-        ]
         self.set_status("demo", "演示模式：固定样例，不消耗 API 额度。")
         index = 0
         while True:
-            author, original, translation, language = samples[index % len(samples)]
+            author, original, translation, language = DEMO_SAMPLES[index % len(DEMO_SAMPLES)]
             mid = f"demo-{index}"
             self.add({"id": mid, "author_id": author, "author": author, "avatar": "/avatar.svg",
                       "role": "moderator" if index % 6 == 0 else "normal", "time": datetime.now(timezone.utc).isoformat(),
                       "original": original, "translation": "", "source_language": "", "translation_status": "pending"})
             await asyncio.sleep(0.7)
-            # Demo translations are explicitly fixed examples, not live machine translation.
-            if self.config.target_language == "zh-Hans":
-                self.translated(mid, Result(translation, language), "complete")
-            else:
-                self.translated(mid, None, "skipped")
+            self.translate_demo(mid)
             index += 1
             await asyncio.sleep(1.5)

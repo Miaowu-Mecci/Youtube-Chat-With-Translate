@@ -81,7 +81,7 @@ async def test_language_change_cancels_old_jobs_and_keeps_one_stream():
         await hub.connect()
         await asyncio.wait_for(request_started.wait(), 1)
         source_task = hub.task
-        await hub.configure(config.model_copy(update={'target_language': 'zh-Hans'}))
+        await hub.configure(config.model_copy(update={'target_language': 'zh-Hans', 'target_languages': ['zh-Hans']}))
         release.set()
         await asyncio.wait_for(hub.pool.queue.join(), 1)
         assert hub.messages['one']['translation'] == 'zh-Hans'

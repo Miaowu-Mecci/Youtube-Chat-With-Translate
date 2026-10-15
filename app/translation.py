@@ -168,6 +168,7 @@ class TranslationPool:
                  concurrency: int = 4, capacity: int = 200, timeout: float = 5,
                  is_current: Callable = lambda mid: True):
         self.provider, self.target = provider, target
+        self.multi = isinstance(target, list)
         self.on_result, self.on_state = on_result, on_state
         self.queue = asyncio.Queue(maxsize=capacity)
         self.pending: dict[str, list[str]] = {}
@@ -202,32 +203,51 @@ class TranslationPool:
         self.pending.clear()
         self.cache.clear()
 
+    def emit(self, mid, result, status, target):
+        if self.multi:
+            self.on_result(mid, result, status, target)
+        else:
+            self.on_result(mid, result, status)
+
     def submit(self, mid: str, text: str) -> str:
+        if not self.multi:
+            return self.submit_target(mid, text, self.target)
+        states = []
+        for target in self.target:
+            state = self.submit_target(mid, text, target)
+            states.append(state)
+            if state != "complete":
+                self.emit(mid, None, state, target)
+        return "pending" if "pending" in states else "complete" if all(s == "complete" for s in states) else "skipped"
+
+    def submit_target(self, mid: str, text: str, target: str) -> str:
+        job = (target, text)
         if self.closed or self.paused or getattr(self.provider, "paused", False) or not should_translate(text):
             return "skipped"
-        if text in self.cache:
-            self.cache.move_to_end(text)
-            self.on_result(mid, self.cache[text], "complete")
+        if job in self.cache:
+            self.cache.move_to_end(job)
+            self.emit(mid, self.cache[job], "complete", target)
             return "complete"
-        if text in self.pending:
+        if job in self.pending:
             # Hub only retains 500 messages; bound duplicate waiters as well.
-            self.pending[text] = (self.pending[text] + [mid])[-500:]
+            self.pending[job] = (self.pending[job] + [mid])[-500:]
             return "pending"
         if self.queue.full():
             self.discard_stale_jobs()
         if self.queue.full():
             self.on_state("busy", "翻译队列已满，部分弹幕仅显示原文。")
             return "skipped"
-        self.pending[text] = [mid]
-        self.queue.put_nowait(text)
+        self.pending[job] = [mid]
+        self.queue.put_nowait(job)
         return "pending"
 
     async def worker(self):
         while True:
-            text = await self.queue.get()
+            job = await self.queue.get()
+            target, text = job
             result, status = None, "failed"
             try:
-                if not any(self.is_current(mid) for mid in self.pending.get(text, [])):
+                if not any(self.is_current(mid) for mid in self.pending.get(job, [])):
                     continue
                 if not self.paused:
                     await asyncio.sleep(max(0, self.cooldown_until - time.monotonic()))
@@ -236,15 +256,15 @@ class TranslationPool:
                         if isinstance(self.provider, GoogleWebTranslator):
                             # Pacing/cooldown is outside the five-second network timeout.
                             await self.provider.wait_ready()
-                            if not any(self.is_current(mid) for mid in self.pending.get(text, [])):
+                            if not any(self.is_current(mid) for mid in self.pending.get(job, [])):
                                 continue
-                            result = await self.provider.translate(text, self.target)
+                            result = await self.provider.translate(text, target)
                         else:
-                            result = await asyncio.wait_for(self.provider.translate(text, self.target), self.timeout)
+                            result = await asyncio.wait_for(self.provider.translate(text, target), self.timeout)
                         status = "complete"
                         if not self.paused:
                             self.on_state("active", "翻译运行中。")
-                        self.cache[text] = result
+                        self.cache[job] = result
                         if len(self.cache) > 1000:
                             self.cache.popitem(last=False)
             except (TimeoutError, TranslationError) as error:
@@ -267,7 +287,7 @@ class TranslationPool:
                 self.paused = True
                 self.on_state("paused", "翻译任务异常，已暂停；请点击「恢复翻译」重试。")
             finally:
-                for mid in self.pending.pop(text, []):
+                for mid in self.pending.pop(job, []):
                     if not self.closed and self.is_current(mid):
-                        self.on_result(mid, result, status)
+                        self.emit(mid, result, status, target)
                 self.queue.task_done()

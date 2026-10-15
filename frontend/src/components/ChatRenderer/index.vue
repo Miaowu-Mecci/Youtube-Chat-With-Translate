@@ -19,6 +19,7 @@
                 :privilegeType="message.privilegeType"
                 :contentParts="message.contentParts"
                 :translation="message.translation"
+                :translations="message.translations"
                 :messageId="message.id"
                 :repeated="message.repeated"
               ></text-message>

@@ -7,8 +7,7 @@
       <span id="timestamp" class="style-scope yt-live-chat-text-message-renderer">{{ timeText }}</span>
       <author-chip class="style-scope yt-live-chat-text-message-renderer"
         :isInMemberMessage="false" :authorName="authorName" :authorType="authorType" :privilegeType="privilegeType"
-      ></author-chip>
-      <span v-if="translation" class="translation style-scope yt-live-chat-text-message-renderer" dir="auto">{{ translation }}</span>
+      ></author-chip><span class="author-separator" aria-hidden="true">: </span>
       <span id="message" class="style-scope yt-live-chat-text-message-renderer">
         <template v-for="(content, index) in contentParts">
           <span :key="index" v-if="content.type === CONTENT_PART_TYPE_TEXT">{{ content.text }}</span>
@@ -22,6 +21,14 @@
         </template>
 
       </span>
+      <ul v-if="translations && translations.length" class="translation-list" aria-label="多语言译文">
+        <li v-for="row in translations" :key="row.language" :lang="row.language" :data-language="row.language" :data-status="row.status" class="translation-row">
+          <span class="translation-language">{{ row.language }}</span>
+          <span v-if="row.text" class="translation" dir="auto">{{ row.text }}</span>
+          <span v-else class="translation-placeholder">{{ row.status === 'pending' ? '翻译中…' : row.status === 'failed' ? '翻译暂不可用' : '已跳过' }}</span>
+        </li>
+      </ul>
+      <span v-else-if="translation" class="translation" dir="auto">{{ translation }}</span>
     </div>
   </yt-live-chat-text-message-renderer>
 </template>
@@ -45,6 +52,7 @@ export default {
   props: {
     avatarUrl: String,
     translation: String,
+    translations: Array,
     messageId: String,
     time: Date,
     authorName: String,

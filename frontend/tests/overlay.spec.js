@@ -8,7 +8,7 @@ test.beforeEach(async ({ request, page }) => {
   await request.post('/api/disconnect')
   await request.put('/api/config', { data: config })
   await page.route('**/api/languages*', route => {
-    const languages = [{ code: 'zh-Hans', name: '简体中文' }, { code: 'ja', name: '日本語' }]
+    const languages = [{ code: 'zh-Hans', name: '简体中文' }, { code: 'ja', name: '日本語' }, { code: 'en', name: 'English' }, { code: 'fr', name: 'Français' }]
     if (new URL(route.request().url()).searchParams.get('provider') === 'azure') languages.push({ code: 'it', name: 'Italiano' })
     return route.fulfill({ json: { languages } })
   })
@@ -70,7 +70,7 @@ test('translation events update existing rows and deleted rows stay deleted', as
   await expect(page.locator('.translation')).toHaveText('你好')
   await expect(page.locator('yt-live-chat-text-message-renderer')).toHaveCount(1)
   const positions = await page.locator('[data-message-id="one"]').evaluate(el => ({ original: el.querySelector('#message').getBoundingClientRect().top, translation: el.querySelector('.translation').getBoundingClientRect().top }))
-  expect(positions.translation).toBeLessThan(positions.original)
+  expect(positions.translation).toBeGreaterThan(positions.original)
   send({ type: 'delete', ids: ['one'] })
   await expect(page.locator('yt-live-chat-text-message-renderer')).toHaveCount(0)
   send({ type: 'translation', id: 'one', translation: '迟到的译文' })
@@ -135,12 +135,14 @@ test('switching services preserves Azure credentials and resets unsupported lang
   await page.locator('#azure-key').fill('MOCK_AZURE_KEY')
   await page.locator('#region').fill('eastasia')
   await page.locator('#language').selectOption('it')
+  await page.getByRole('button', { name: '添加', exact: true }).click()
+  await page.getByRole('button', { name: '移除 简体中文', exact: true }).click()
   await page.getByRole('button', { name: '保存设置', exact: true }).click()
   await expect(page.getByRole('status')).toContainText('设置已保存')
   await page.locator('#provider').selectOption('google_web')
   await expect(page.locator('#azure-key')).toHaveCount(0)
-  await expect(page.locator('#language')).toHaveValue('zh-Hans')
-  await expect(page.locator('#translation')).toContainText('不支持原目标语言')
+  await expect(page.locator('.language-stack li')).toHaveAttribute('data-language', 'zh-Hans')
+  await expect(page.locator('#translation')).toContainText('不支持的目标语言')
   await page.getByRole('button', { name: '保存设置', exact: true }).click()
   await expect.poll(async () => (await (await request.get('/api/config')).json()).translation_provider).toBe('google_web')
   const saved = await (await request.get('/api/config')).json()
@@ -157,7 +159,7 @@ test('Azure language lookup failure preserves an existing target on upgrade', as
     languages: [{ code: 'zh-Hans', name: '简体中文' }], fallback: true, message: '语言列表暂不可用。'
   } }))
   await page.goto('/')
-  await expect(page.locator('#language')).toHaveValue('it')
+  await expect(page.locator('.language-stack li')).toHaveAttribute('data-language', 'it')
   await page.getByRole('button', { name: '保存设置', exact: true }).click()
   await expect(page.getByRole('status')).toContainText('设置已保存')
   expect((await (await request.get('/api/config')).json()).target_language).toBe('it')
@@ -224,4 +226,70 @@ test('connect sends the click time before saving settings and explains history f
   sockets.forEach(ws => ws.send(JSON.stringify({ type: 'status', session: 'fresh', status: { connection: 'connected', chat_started_at: connectionBody.started_at, ignored_history: 500 } })))
   await expect(page.getByText('仅收录点击「连接直播间」后发布的新弹幕，不显示或翻译此前的历史弹幕。')).toBeVisible()
   await expect(page.getByText('已过滤 500 条历史弹幕；自动重连继续使用本次连接的起点。')).toBeVisible()
+})
+
+
+test('multiple target languages can be added, reordered, saved and restored in demo and OBS', async ({ page, context, request }) => {
+  await page.goto('/')
+  await expect(page.locator('#youtube-key')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /免费网页抓取/ })).toHaveClass(/selected/)
+  await page.locator('#language').selectOption('en')
+  await page.getByRole('button', { name: '添加', exact: true }).click()
+  await expect(page.locator('.language-stack li')).toHaveCount(2)
+  await page.getByRole('button', { name: '上移 English', exact: true }).click()
+  await expect(page.locator('.language-stack li').first()).toHaveAttribute('data-language', 'en')
+  // Native drag-and-drop also works, without making it the only keyboard interaction.
+  await page.locator('.language-stack li[data-language="zh-Hans"]').dragTo(page.locator('.language-stack li[data-language="en"]'))
+  await expect(page.locator('.language-stack li').first()).toHaveAttribute('data-language', 'zh-Hans')
+  await page.getByRole('button', { name: '保存设置', exact: true }).click()
+  await expect(page.getByRole('status')).toContainText('设置已保存')
+  expect((await (await request.get('/api/config')).json()).target_languages).toEqual(['zh-Hans', 'en'])
+  await page.reload()
+  await expect(page.locator('.language-stack li')).toHaveCount(2)
+  await page.getByRole('button', { name: '体验演示' }).click()
+  const preview = page.frameLocator('iframe')
+  await expect(preview.locator('[data-message-id="demo-0"] .translation')).toHaveCount(2)
+  await expect(preview.locator('[data-message-id="demo-0"] .translation').nth(1)).toContainText('Hello!')
+  const overlay = await context.newPage()
+  await overlay.goto('/overlay')
+  await expect(overlay.locator('[data-message-id="demo-0"] .translation')).toHaveCount(2)
+  await page.getByRole('button', { name: '上移 English', exact: true }).click()
+  await page.getByRole('button', { name: '保存设置', exact: true }).click()
+  await expect(overlay.locator('[data-message-id="demo-0"] .translation-row').first()).toHaveAttribute('data-language', 'en')
+  await expect(overlay.locator('[data-message-id="demo-0"] .translation').first()).toContainText('Hello!')
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.screenshot({ path: 'test-results/multilingual-dashboard.png', fullPage: true })
+  await overlay.close()
+})
+
+
+test('original stays above ordered translations including an identical source-language result', async ({ page }) => {
+  let socket
+  await page.routeWebSocket('**/ws', ws => {
+    socket = ws
+    ws.send(JSON.stringify({ type: 'snapshot', session: 'multi', messages: [], config: { ...config, target_languages: ['zh-Hans', 'en'] }, status: {} }))
+  })
+  await page.goto('/overlay')
+  await expect.poll(() => Boolean(socket)).toBe(true)
+  const send = event => socket.send(JSON.stringify({ session: 'multi', ...event }))
+  const rows = [
+    { language: 'zh-Hans', text: '', status: 'pending' },
+    { language: 'en', text: 'Hello', status: 'complete' },
+  ]
+  send({ type: 'message', message: { id: 'multi-one', author: 'XXX', original: '你好', avatar: '', time: new Date().toISOString(), role: 'normal', translations: rows } })
+  await expect(page.locator('#message')).toHaveText('你好')
+  await expect(page.locator('.translation-row')).toHaveCount(2)
+  await expect(page.locator('.translation-row').first()).toContainText('翻译中')
+  rows[0] = { language: 'zh-Hans', text: '你好', status: 'complete' }
+  send({ type: 'translation', id: 'multi-one', translations: rows })
+  await expect(page.locator('.translation')).toHaveText(['你好', 'Hello'])
+  const positions = await page.locator('[data-message-id="multi-one"]').evaluate(el => ({
+    original: el.querySelector('#message').getBoundingClientRect().top,
+    rows: [...el.querySelectorAll('.translation')].map(row => row.getBoundingClientRect().top),
+  }))
+  expect(positions.rows[0]).toBeGreaterThan(positions.original)
+  expect(positions.rows[1]).toBeGreaterThan(positions.rows[0])
+  send({ type: 'delete', ids: ['multi-one'] })
+  send({ type: 'translation', id: 'multi-one', translations: rows })
+  await expect(page.locator('yt-live-chat-text-message-renderer')).toHaveCount(0)
 })

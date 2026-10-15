@@ -36,7 +36,7 @@ export default {
     adapt(message) {
       return { id: message.id, type: 0, authorName: message.author, avatarUrl: message.avatar,
         time: new Date(message.time), authorType: { normal: 0, member: 1, moderator: 2, owner: 3 }[message.role] || 0,
-        privilegeType: 0, repeated: 1, content: message.original, translation: message.translation,
+        privilegeType: 0, repeated: 1, content: message.original, translation: message.translation, translations: message.translations || [],
         contentParts: [{ type: 0, text: message.original }] }
     },
     connect() {
@@ -55,7 +55,7 @@ export default {
           window.parent !== window && window.parent.postMessage({ type: 'preview-ready' }, location.origin)
         } else if (event.session === this.session) {
           if (event.type === 'message') renderer.addMessage(this.adapt(event.message))
-          else if (event.type === 'translation') renderer.updateMessage(event.id, { translation: event.translation })
+          else if (event.type === 'translation') renderer.updateMessage(event.id, { translation: event.translation, translations: event.translations || [] })
           else if (event.type === 'delete') renderer.delMessages(event.ids)
         }
       }

@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -24,18 +25,28 @@ class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
     source: str = Field(default="", max_length=2048)
     source_type: str = Field(default="auto", pattern=r"^(auto|video|chat)$")
+    youtube_provider: str = Field(default="web", pattern=r"^(web|api)$")
     youtube_key: str = Field(default="", max_length=512, repr=False)
     translation_enabled: bool = False
     translation_provider: str = Field(default="google_web", pattern=r"^(google_web|azure)$")
     azure_key: str = Field(default="", max_length=512, repr=False)
     azure_region: str = Field(default="", max_length=64, pattern=r"^[a-zA-Z0-9-]*$")
     target_language: str = Field(default="zh-Hans", pattern=r"^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$")
+    target_languages: list[str] | None = Field(default=None, min_length=1, max_length=8)
     style: Style = Field(default_factory=Style)
 
     @model_validator(mode="after")
     def normalize_target(self):
         if self.translation_provider == "google_web" and self.target_language not in {item["code"] for item in GOOGLE_LANGUAGES}:
             self.target_language = "zh-Hans"
+        targets = self.target_languages or [self.target_language]
+        if any(not re.fullmatch(r"[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*", code) for code in targets):
+            raise ValueError("Invalid target language")
+        if self.translation_provider == "google_web":
+            supported = {item["code"] for item in GOOGLE_LANGUAGES}
+            targets = [code for code in targets if code in supported] or ["zh-Hans"]
+        self.target_languages = list(dict.fromkeys(targets))
+        self.target_language = self.target_languages[0]
         return self
 
     def public(self):
@@ -50,6 +61,7 @@ class ConfigStore:
         if path.exists():
             values = json.loads(path.read_text("utf-8"))
             values.setdefault("translation_provider", "azure")
+            values.setdefault("youtube_provider", "api" if values.get("youtube_key") else "web")
             self.config = Config.model_validate(values)
         else:
             self.config = Config()

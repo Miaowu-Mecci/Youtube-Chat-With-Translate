@@ -5,13 +5,13 @@
       <a class="brand" href="/"><span class="brand-mark">译</span><span>LiveChat<span class="brand-sub">YOUTUBE · OBS</span></span></a>
       <div class="side-label">工作空间</div>
       <a class="nav-item active" href="#connection"><span>◉</span> 直播弹幕</a>
-      <a class="nav-item" href="#translation"><span>文</span> 双语翻译</a>
+      <a class="nav-item" href="#translation"><span>文</span> 多语言翻译</a>
       <a class="nav-item" href="#appearance"><span>◐</span> 外观与样式</a>
       <div class="side-bottom"><span class="local-dot"></span> 本地运行<span class="side-note">你的直播，你的表达。</span></div>
     </aside>
     <main class="workspace">
-      <header class="topbar"><span>工作空间 <span class="crumb">/</span> 直播弹幕</span><span class="version">LOCAL · v0.1</span></header>
-      <div class="page-title"><div><div class="eyebrow">CONNECT WITHOUT LANGUAGE BARRIERS</div><h1>让每一句话，都被听懂<span>。</span></h1><p>将 YouTube 直播弹幕带入 OBS，让原文和译文一起出现。</p></div><button class="secondary" :disabled="busy" @click="action('demo')">▷ 体验演示</button></div>
+      <header class="topbar"><span>工作空间 <span class="crumb">/</span> 直播弹幕</span><span class="version">FREE CHAT · MULTILINGUAL</span></header>
+      <div class="page-title"><div><div class="eyebrow">CONNECT WITHOUT LANGUAGE BARRIERS</div><h1>让每一句话，都被听懂<span>。</span></h1><p>将 YouTube 直播弹幕带入 OBS，让每一种语言都有位置。</p></div><button class="secondary" :disabled="busy" @click="action('demo', true)">▷ 体验演示</button></div>
       <div class="toast" role="status" v-if="notice">{{ notice }}</div>
       <div class="columns">
         <div class="settings">
@@ -19,8 +19,15 @@
             <div class="card-heading"><h2><span class="step">01</span> 连接直播间</h2><span class="status-pill" :class="status.connection">{{ statusLabel }}</span></div>
             <label for="source">YouTube 直播链接 / ID</label>
             <input id="source" v-model="form.source" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off">
-            <div class="field-row"><div><label for="source-type">输入类型</label><select id="source-type" v-model="form.source_type"><option value="auto">自动识别</option><option value="video">视频链接 / 视频 ID</option><option value="chat">liveChatId</option></select></div><div><label for="youtube-key">YouTube API Key <span v-if="youtubeKeySet" class="saved">已保存</span></label><input id="youtube-key" v-model="youtubeKey" type="password" :placeholder="youtubeKeySet ? '留空保留已保存的 Key' : '输入 API Key'" autocomplete="new-password"></div></div>
-            <div class="helper-row"><a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noreferrer">启用 YouTube Data API ↗</a><button v-if="youtubeKeySet" class="text-button" @click="clearSecret('youtube_key')">清除 Key</button></div>
+            <div class="source-options" role="group" aria-label="弹幕接入方式">
+              <button :class="{ selected: form.youtube_provider === 'web' }" @click="form.youtube_provider = 'web'; form.source_type = 'auto'"><span>✦ 免费网页抓取</span><small>无需 API Key · 公开直播</small></button>
+              <button :class="{ selected: form.youtube_provider === 'api' }" @click="form.youtube_provider = 'api'"><span>官方 API</span><small>使用自己的 YouTube Key</small></button>
+            </div>
+            <p v-if="form.youtube_provider === 'web'" class="small">粘贴直播视频链接即可。无需账号或 API 配额；非官方网页接口可能限流或变化，不支持私有直播、回放和 liveChatId。</p>
+            <template v-if="form.youtube_provider === 'api'">
+              <div class="field-row"><div><label for="source-type">输入类型</label><select id="source-type" v-model="form.source_type"><option value="auto">自动识别</option><option value="video">视频链接 / 视频 ID</option><option value="chat">liveChatId</option></select></div><div><label for="youtube-key">YouTube API Key <span v-if="youtubeKeySet" class="saved">已保存</span></label><input id="youtube-key" v-model="youtubeKey" type="password" :placeholder="youtubeKeySet ? '留空保留已保存的 Key' : '输入 API Key'" autocomplete="new-password"></div></div>
+              <div class="helper-row"><a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noreferrer">启用 YouTube Data API ↗</a><button v-if="youtubeKeySet" class="text-button" @click="clearSecret('youtube_key')">清除 Key</button></div>
+            </template>
             <div class="button-row"><button class="primary" :disabled="busy" @click="action('connect', true)">连接直播间 <span>→</span></button><button class="secondary" :disabled="busy" @click="action('disconnect')">断开</button></div>
             <p class="connection-message">{{ status.message }}</p>
             <p class="small">仅收录点击「连接直播间」后发布的新弹幕，不显示或翻译此前的历史弹幕。</p>
@@ -28,12 +35,25 @@
           </section>
 
           <section class="card" id="translation">
-            <div class="card-heading"><h2><span class="step">02</span> 双语翻译</h2><label class="switch"><input type="checkbox" v-model="form.translation_enabled" aria-label="开启翻译"><span></span></label></div>
+            <div class="card-heading"><h2><span class="step">02</span> 多语言翻译</h2><label class="switch"><input type="checkbox" v-model="form.translation_enabled" aria-label="开启翻译"><span></span></label></div>
             <p class="card-description">原文即时出现，译文随后补上。让不同语言的观众一起参与。</p>
             <label for="provider">翻译服务</label><select id="provider" v-model="form.translation_provider" @change="providerChanged"><option value="google_web">Google 翻译 · 免 Key（实验性）</option><option value="azure">Azure Translator · F0 免费档</option></select>
             <p v-if="form.translation_provider === 'google_web'" class="small">免账号、免 Key；接口可能限流，失败时保留原文。</p>
-            <label for="language">主播的目标语言</label><select id="language" v-model="form.target_language"><option v-for="language in languages" :key="language.code" :value="language.code">{{ language.name }} · {{ language.code }}</option></select>
-            <div class="translation-flow"><span>自动识别观众语言</span><span>→</span><strong>{{ targetName }}</strong><span class="flow-badge">译文 + 原文</span></div>
+            <div class="language-heading"><label>目标语言与显示顺序</label><span>{{ form.target_languages.length }} / 8</span></div>
+            <ol class="language-stack" aria-label="已选目标语言">
+              <li v-for="(code, index) in form.target_languages" :key="code" draggable="true" @dragstart="dragIndex = index" @dragover.prevent @drop.prevent="dropLanguage(index)" @dragend="dragIndex = null" :data-language="code">
+                <span class="language-number">{{ String(index + 1).padStart(2, '0') }}</span>
+                <div class="language-name"><strong>{{ languageName(code) }}</strong><small>{{ code }}</small></div>
+                <div class="language-actions">
+                  <button :aria-label="'上移 ' + languageName(code)" :disabled="index === 0" @click="moveLanguage(index, index - 1)">↑</button>
+                  <button :aria-label="'下移 ' + languageName(code)" :disabled="index === form.target_languages.length - 1" @click="moveLanguage(index, index + 1)">↓</button>
+                  <button :aria-label="'移除 ' + languageName(code)" :disabled="form.target_languages.length === 1" @click="removeLanguage(index)">×</button>
+                </div>
+              </li>
+            </ol>
+            <div class="add-language"><select id="language" v-model="languageToAdd" aria-label="添加目标语言"><option value="" disabled>＋ 添加一种语言</option><option v-for="language in availableLanguages" :key="language.code" :value="language.code">{{ language.name }} · {{ language.code }}</option></select><button class="secondary" :disabled="!languageToAdd || form.target_languages.length >= 8" @click="addLanguage">添加</button></div>
+            <p class="small">拖动语言卡片或使用 ↑ ↓ 调整顺序，保存后同步到 OBS。最多选择 8 种；每种语言单独请求，语言越多，翻译等待越长。</p>
+            <div class="translation-flow"><span>原文</span><span>→</span><strong>{{ targetName }}</strong><span class="flow-badge">按序逐行显示</span></div>
             <div v-if="form.translation_provider === 'azure'" class="field-row"><div><label for="azure-key">Azure Translator Key <span v-if="azureKeySet" class="saved">已保存</span></label><input id="azure-key" v-model="azureKey" type="password" :placeholder="azureKeySet ? '留空保留已保存的 Key' : '输入 F0 资源 Key'" autocomplete="new-password"></div><div><label for="region">资源区域</label><input id="region" v-model="form.azure_region" placeholder="例如 eastasia" autocomplete="off"></div></div>
             <div v-if="form.translation_provider === 'azure'" class="helper-row"><a href="https://portal.azure.com/" target="_blank" rel="noreferrer">创建 Translator F0 免费资源 ↗</a><button v-if="azureKeySet" class="text-button" @click="clearSecret('azure_key')">清除 Key</button></div>
             <div v-if="form.translation_provider === 'azure'" class="info-note"><span>ⓘ</span><span>使用 Azure F0 免费档，每月 200 万字符。额度不足或翻译失败时，弹幕继续显示原文。</span></div>
@@ -41,7 +61,7 @@
             <p class="small">测试会向选定服务发送固定外语样例，不需要连接 YouTube。测试翻译不受弹幕翻译开关控制。</p>
             <p class="connection-message" role="status" aria-label="翻译测试结果" v-if="testResult">{{ testResult }}</p>
             <p class="connection-message">{{ status.translation_message }}</p>
-            <p v-if="status.translation_counts" class="small" aria-label="翻译进度">当前保留弹幕：等待 {{ status.translation_counts.pending }} · 已完成 {{ status.translation_counts.complete }} · 失败 {{ status.translation_counts.failed }} · 跳过 {{ status.translation_counts.skipped }}。Google 每秒最多处理约一条；恢复翻译会重新处理未完成消息。</p>
+            <p v-if="status.translation_counts" class="small" aria-label="翻译进度">当前保留弹幕：等待 {{ status.translation_counts.pending }} · 已完成 {{ status.translation_counts.complete }} · 失败 {{ status.translation_counts.failed }} · 跳过 {{ status.translation_counts.skipped }}。Google 每秒最多请求约一种语言；恢复翻译会重新处理未完成消息。</p>
             <p class="small" v-if="languageNotice">{{ languageNotice }}</p>
           </section>
 
@@ -56,7 +76,7 @@
         </div>
 
         <div class="preview-column">
-          <section class="card preview-card"><div class="card-heading"><h2>评论栏预览</h2><span class="preview-live"><span class="local-dot"></span> LIVE PREVIEW</span></div><div class="preview-screen"><div class="preview-caption">YOUR STREAM, CONNECTED.</div><iframe ref="preview" src="/overlay" title="OBS 评论栏实时预览" @load="draftPreview"></iframe><div v-if="!hasMessages" class="empty-state"><span>文 ↔ A</span><strong>跨越语言，开始对话</strong><p>连接直播间或点击「体验演示」<br>这里将展示你的双语评论栏</p></div></div><div class="preview-footer"><span>透明背景 · 译文在上，原文在下</span><a href="/overlay" target="_blank" rel="noreferrer">独立预览 ↗</a></div></section>
+          <section class="card preview-card"><div class="card-heading"><h2>评论栏预览</h2><span class="preview-live"><span class="local-dot"></span> LIVE PREVIEW</span></div><div class="preview-screen"><div class="preview-caption">YOUR STREAM, CONNECTED.</div><iframe ref="preview" src="/overlay" title="OBS 评论栏实时预览" @load="draftPreview"></iframe><div v-if="!hasMessages" class="empty-state"><span>文 ↔ A</span><strong>跨越语言，开始对话</strong><p>连接直播间或点击「体验演示」<br>这里将展示你的多语言评论栏</p></div></div><div class="preview-footer"><span>透明背景 · 原文在上，多语言依序排列</span><a href="/overlay" target="_blank" rel="noreferrer">独立预览 ↗</a></div></section>
           <section class="card obs-card"><div class="card-heading"><h2>添加到 OBS</h2><span class="obs-badge">浏览器源</span></div><p class="card-description">在 OBS 中添加「浏览器」源，粘贴下方地址。</p><div class="url-box"><code>{{ overlayUrl }}</code><button aria-label="复制 OBS 地址" @click="copy(overlayUrl, 'OBS 地址已复制')">复制</button></div><div class="obs-tip"><span>建议尺寸</span><strong>480 × 720</strong></div><p class="small">OBS 自定义 CSS 保留透明背景设置即可。页面不包含控制按钮，多个浏览器源共享同一直播连接。</p></section>
           <div class="privacy-note"><span>⌁</span><p>密钥只保存在本地。开启翻译后，弹幕文本会发送至选定的 Google 或 Azure 服务。演示模式不消耗额度。</p></div>
         </div>
@@ -69,19 +89,20 @@
 <script>
 import Overlay from './Overlay.vue'
 import { makeCSS } from './style'
-const initial = { source: '', source_type: 'auto', translation_enabled: false, translation_provider: 'google_web', azure_region: '', target_language: 'zh-Hans',
+const initial = { source: '', source_type: 'auto', youtube_provider: 'web', target_languages: ['zh-Hans'], translation_enabled: false, translation_provider: 'google_web', azure_region: '', target_language: 'zh-Hans',
   style: { font_size: 24, color: '#ffffff', translation_color: '#8de1cb', show_avatar: true, max_messages: 100, custom_css: '' } }
 export default {
   components: { Overlay },
   data: () => ({ isOverlay: location.pathname === '/overlay', form: JSON.parse(JSON.stringify(initial)),
     youtubeKey: '', azureKey: '', youtubeKeySet: false, azureKeySet: false,
     status: { connection: 'idle', message: '尚未连接。', translation_message: '翻译未开启。' },
-    testResult: '', languages: [{ code: 'zh-Hans', name: '简体中文' }], languageNotice: '', notice: '', busy: false, hasMessages: false,
+    languageToAdd: '', dragIndex: null, testResult: '', languages: [{ code: 'zh-Hans', name: '简体中文' }], languageNotice: '', notice: '', busy: false, hasMessages: false,
     socket: null, retryTimer: null, stopped: false, ready: false }),
   computed: {
     overlayUrl() { return `${location.origin}/overlay` },
     css() { return makeCSS(this.form.style) },
-    targetName() { return this.languages.find(item => item.code === this.form.target_language)?.name || this.form.target_language },
+    targetName() { return this.form.target_languages.map(this.languageName).join(' → ') },
+    availableLanguages() { return this.languages.filter(item => !this.form.target_languages.includes(item.code)) },
     statusLabel() { return { idle: '未连接', connecting: '连接中', connected: '已连接', reconnecting: '重连中', demo: '演示中', error: '连接异常', ended: '已结束' }[this.status.connection] || '未连接' }
   },
   watch: { 'form.style': { deep: true, handler() { this.draftPreview() } } },
@@ -107,7 +128,7 @@ export default {
     },
     loadConfig(config) {
       const { youtube_key_set, azure_key_set, ...form } = config
-      this.form = form
+      this.form = { ...form, youtube_provider: form.youtube_provider || 'web', target_languages: form.target_languages || [form.target_language || 'zh-Hans'] }
       this.youtubeKeySet = youtube_key_set
       this.azureKeySet = azure_key_set
       this.youtubeKey = ''; this.azureKey = ''
@@ -119,15 +140,32 @@ export default {
         if (provider !== this.form.translation_provider) return
         this.languages = data.languages
         this.languageNotice = data.message || ''
-        if (!this.languages.some(item => item.code === this.form.target_language) && provider === 'azure' && data.fallback) {
-          // A partial fallback list cannot establish that an existing Azure target is unsupported.
-          this.languages.push({ code: this.form.target_language, name: this.form.target_language })
-        } else if (!this.languages.some(item => item.code === this.form.target_language)) {
-          this.form.target_language = 'zh-Hans'
-          this.languageNotice = '当前服务不支持原目标语言，已改为简体中文；请保存设置。'
+        const selected = this.form.target_languages
+        if (provider === 'azure' && data.fallback) {
+          for (const code of selected) if (!this.languages.some(item => item.code === code)) this.languages.push({ code, name: code })
+        } else {
+          const supported = selected.filter(code => this.languages.some(item => item.code === code))
+          if (supported.length !== selected.length) {
+            this.form.target_languages = supported.length ? supported : ['zh-Hans']
+            this.languageNotice = '当前服务不支持的目标语言已移除；请保存设置。'
+          }
         }
+        this.languageToAdd = ''
+
       } catch { this.languageNotice = '语言列表暂不可用，请刷新页面重试。' }
     },
+    languageName(code) { return this.languages.find(item => item.code === code)?.name || code },
+    addLanguage() {
+      if (this.languageToAdd && this.form.target_languages.length < 8 && !this.form.target_languages.includes(this.languageToAdd)) this.form.target_languages.push(this.languageToAdd)
+      this.languageToAdd = ''
+    },
+    removeLanguage(index) { if (this.form.target_languages.length > 1) this.form.target_languages.splice(index, 1) },
+    moveLanguage(from, to) {
+      if (to < 0 || to >= this.form.target_languages.length || from === to) return
+      const [code] = this.form.target_languages.splice(from, 1)
+      this.form.target_languages.splice(to, 0, code)
+    },
+    dropLanguage(index) { if (this.dragIndex !== null) this.moveLanguage(this.dragIndex, index); this.dragIndex = null },
     async providerChanged() {
       this.testResult = ''
       await this.loadLanguages()
@@ -138,7 +176,7 @@ export default {
       try {
         await this.persist()
         const result = await this.api('/api/translation/test', 'POST')
-        this.testResult = `测试成功：${result.original} → ${result.translation}`
+        this.testResult = `测试成功：${result.original} → ${(result.translations || [{ text: result.translation }]).map(row => row.text).join(' / ')}`
       } catch (error) { this.testResult = error.message }
       finally { this.busy = false }
     },
@@ -154,6 +192,7 @@ export default {
     async persist() {
       if (!this.ready) throw new Error('配置尚未加载，请刷新页面后重试。')
       const payload = JSON.parse(JSON.stringify(this.form))
+      payload.target_language = payload.target_languages[0]
       if (this.youtubeKey) payload.youtube_key = this.youtubeKey.trim()
       if (this.azureKey) payload.azure_key = this.azureKey.trim()
       this.loadConfig(await this.api('/api/config', 'PUT', payload))
@@ -166,7 +205,7 @@ export default {
     async action(name, saveFirst = false) {
       const clickedAt = new Date().toISOString()
       this.busy = true
-      try { if (saveFirst) await this.persist(); await this.api(`/api/${name}`, 'POST', name === 'connect' ? { started_at: clickedAt } : undefined); this.notice = name === 'demo' ? '演示模式已启动，简体中文译文为固定样例。' : '' }
+      try { if (saveFirst) await this.persist(); await this.api(`/api/${name}`, 'POST', name === 'connect' ? { started_at: clickedAt } : undefined); this.notice = name === 'demo' ? '演示模式已启动，中英文译文为固定样例，其他语言跳过；不调用真实翻译。' : '' }
       catch (error) { this.notice = error.message }
       finally { this.busy = false }
     },
@@ -224,4 +263,19 @@ export default {
 @media (max-width: 1150px) { .sidebar { width: 180px; padding: 28px 14px; }.workspace { margin-left: 180px; padding: 0 25px 24px; }.columns { gap: 18px; grid-template-columns: minmax(320px, 1.1fr) minmax(300px, 1fr); }.card { padding: 20px; }.preview-card { padding: 0; }.field-row { gap: 12px; }.translation-flow { gap: 7px; } }
 @media (max-width: 930px) { .sidebar { width: 70px; padding: 24px 14px; }.brand > span:not(.brand-mark), .side-label, .nav-item, .side-bottom { display: none; }.workspace { margin-left: 70px; }.columns { grid-template-columns: 1fr; }.preview-column { position: static; grid-row: 1; grid-template-columns: 1fr 1fr; }.preview-screen { height: 330px; }.privacy-note { grid-column: 1/-1; }.page-title h1 { font-size: 25px; } }
 @media (max-width: 630px) { .sidebar { display: none; }.workspace { margin: 0; padding: 0 16px 20px; }.topbar { height: 56px; }.page-title { align-items: start; padding-top: 24px; }.page-title h1 { font-size: 23px; }.eyebrow { font-size: 7px; letter-spacing: 1px; }.page-title p { font-size: 11px; line-height: 1.7; }.page-title > button { padding: 9px; white-space: nowrap; font-size: 10px; }.preview-column { grid-template-columns: 1fr; }.preview-screen { height: 360px; }.field-row { grid-template-columns: 1fr; }.page-footer { display: block; line-height: 2; }.page-footer a { display: block; }.label-note { float: none; display: block; margin-top: 5px; } }
+.source-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 18px; }
+.source-options button { border: 1px solid #dfe6e0; background: #fff; text-align: left; padding: 14px; color: #53675b; }
+.source-options button.selected { background: #eef8f2; border-color: #438f72; box-shadow: 0 0 0 1px #438f72; }
+.source-options span, .source-options small { display: block; }.source-options span { font-weight: 600; }.source-options small { margin-top: 6px; font-size: 10px; opacity: .7; }
+.translation-flow { flex-wrap: wrap; }.translation-flow strong { overflow-wrap: anywhere; }
+.language-heading { display: flex; justify-content: space-between; margin-top: 22px; }.language-heading > span { color: #769786; font-size: 11px; }
+.language-stack { list-style: none; padding: 0; margin: 0 0 12px; display: grid; gap: 8px; }
+.language-stack li { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid #dce9e1; border-radius: 10px; background: linear-gradient(110deg, #f2f8f4, #fff); cursor: grab; }
+.language-number { color: #6b9781; font-size: 12px; font-variant-numeric: tabular-nums; }.language-name { flex: 1; }.language-name strong { display: block; font-size: 13px; }.language-name small { display: block; color: #8b9d92; font-size: 10px; margin-top: 3px; }
+.language-actions { display: flex; gap: 4px; }.language-actions button { min-width: 30px; height: 30px; border: 1px solid #e1e9e4; color: #527d66; background: #fff; }.language-actions button:disabled { cursor: default; opacity: .3; }
+.add-language { display: flex; gap: 8px; }.add-language select { flex: 1; min-width: 0; }.add-language button { white-space: nowrap; }
+.dashboard { background: radial-gradient(ellipse at 80% 0, #e7f0e9, transparent 45%), #f6f8f6; }
+.page-title { border-radius: 16px; }.card { border-radius: 16px; box-shadow: 0 8px 30px #203c2f05; }
+.preview-screen { background: radial-gradient(ellipse at 0 0, #375f50, transparent 70%), linear-gradient(145deg, #1c302a, #101c19); }
+.dashboard button:focus-visible { outline: 2px solid #3e9673; outline-offset: 3px; }
 </style>

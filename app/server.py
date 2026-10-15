@@ -15,7 +15,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .config import Config, ConfigStore, GOOGLE_LANGUAGES
 from .hub import ChatHub
 from .paths import data_directory, resource_root
-from .youtube import YouTubeSource
+from .youtube_web import ChatSource
 from .translation import TranslationError
 
 ROOT = resource_root()
@@ -36,7 +36,7 @@ def valid_origin(origin: str | None, host: str) -> bool:
     return parsed.scheme in {"http", "https"} and parsed.netloc == host
 
 
-def create_app(config_path: Path | None = None, source_factory=YouTubeSource):
+def create_app(config_path: Path | None = None, source_factory=ChatSource):
     store = ConfigStore(config_path or data_directory() / "config.json")
 
     @asynccontextmanager
@@ -80,6 +80,8 @@ def create_app(config_path: Path | None = None, source_factory=YouTubeSource):
             # Omitted secret = keep; empty string = delete. Public indicators aren't writable fields.
             values = store.config.model_dump()
             values.update(incoming)
+            if "target_language" in incoming and "target_languages" not in incoming:
+                values["target_languages"] = [incoming["target_language"]]
             config = Config.model_validate(values)
         except (ValueError, TypeError, ValidationError):
             return JSONResponse({"detail": "配置无效，请检查语言、颜色、数值和字段。"}, status_code=422)
