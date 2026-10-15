@@ -329,3 +329,90 @@ test('demo explains unsupported Azure sample instead of a generic skipped label'
   await expect(preview.locator('[data-message-id="demo-0"] [data-language="it"]')).toContainText('演示暂无该语言样例')
   await expect(preview.locator('[data-message-id="demo-0"] [data-language="ja"] .translation')).toContainText('こんにちは')
 })
+
+
+test('mixed channel emotes keep order and images after translation updates', async ({ page }) => {
+  let socket
+  await page.route('https://yt3.ggpht.com/test-emote', route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><circle cx="24" cy="24" r="22" fill="pink"/></svg>' }))
+  await page.routeWebSocket('**/ws', ws => { socket = ws; ws.send(JSON.stringify({ type: 'snapshot', session: 'emotes', messages: [], config, status: {} })) })
+  await page.goto('/overlay')
+  await expect.poll(() => Boolean(socket)).toBe(true)
+  const send = event => socket.send(JSON.stringify({ session: 'emotes', ...event }))
+  send({ type: 'message', message: { id: 'emote-one', author: 'Alice', original: 'Hello :wave: world 🌸 :wave:', role: 'normal', time: new Date().toISOString(), content_parts: [
+    { type: 'text', text: 'Hello ' }, { type: 'emoji', text: ':wave:', url: 'https://yt3.ggpht.com/test-emote', width: 48, height: 48 },
+    { type: 'text', text: ' world 🌸 ' }, { type: 'emoji', text: ':wave:', url: 'https://yt3.ggpht.com/test-emote', width: 48, height: 48 },
+  ] } })
+  const row = page.locator('[data-message-id="emote-one"]')
+  const images = row.locator('#message img.emoji')
+  await expect(images).toHaveCount(2)
+  await expect.poll(() => images.first().evaluate(img => img.complete && img.naturalWidth > 0)).toBe(true)
+  expect(await row.locator('#message').evaluate(el => [...el.children].map(node => node.querySelector('img') ? ':wave:' : node.textContent).join(''))).toBe('Hello :wave: world 🌸 :wave:')
+  send({ type: 'translation', id: 'emote-one', translations: [{ language: 'zh-Hans', text: '你好 世界', status: 'complete' }] })
+  await expect(row.locator('.translation')).toHaveText('你好 世界')
+  await expect(images).toHaveCount(2)
+  await expect(page.locator('yt-live-chat-text-message-renderer')).toHaveCount(1)
+  await expect(images.first()).toHaveAttribute('referrerpolicy', 'no-referrer')
+})
+
+
+test('failed and unsafe image URLs fall back to literal names', async ({ page }) => {
+  let socket
+  let dialogs = 0
+  const invalidRequests = []
+  page.on('dialog', async dialog => { dialogs++; await dialog.dismiss() })
+  page.on('request', req => { if (req.url().includes('evil.example')) invalidRequests.push(req.url()) })
+  await page.route('https://yt3.ggpht.com/broken-emote', route => route.abort())
+  await page.routeWebSocket('**/ws', ws => { socket = ws; ws.send(JSON.stringify({ type: 'snapshot', session: 'fallback', messages: [], config, status: {} })) })
+  await page.goto('/overlay')
+  await expect.poll(() => Boolean(socket)).toBe(true)
+  socket.send(JSON.stringify({ type: 'message', session: 'fallback', message: { id: 'fallback', author: 'Alice', original: ':wave:', role: 'normal', time: new Date().toISOString(), content_parts: [
+    { type: 'emoji', text: ':wave:', url: 'https://yt3.ggpht.com/broken-emote', width: 24, height: 24 },
+    { type: 'emoji', text: '<script>alert(1)</script>', url: 'javascript:alert(1)' },
+    { type: 'emoji', text: ':bad:', url: 'https://yt3.ggpht.com.evil.example/x' },
+  ] } }))
+  const row = page.locator('[data-message-id="fallback"]')
+  await expect(row.locator('.emote-fallback')).toHaveText(':wave:')
+  await expect(row.locator('#message')).toContainText('<script>alert(1)</script>')
+  await expect(row.locator('#message img')).toHaveCount(0)
+  await expect(row.locator('#message script')).toHaveCount(0)
+  expect(invalidRequests).toEqual([])
+  expect(dialogs).toBe(0)
+})
+
+
+test('YouTube stickers are bounded and deletion survives late translations', async ({ page }) => {
+  let socket
+  await page.setViewportSize({ width: 480, height: 720 })
+  await page.route('https://lh3.googleusercontent.com/test-sticker', route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><rect width="200" height="100" fill="pink"/></svg>' }))
+  await page.routeWebSocket('**/ws', ws => { socket = ws; ws.send(JSON.stringify({ type: 'snapshot', session: 'stickers', messages: [], config, status: {} })) })
+  await page.goto('/overlay')
+  await expect.poll(() => Boolean(socket)).toBe(true)
+  const send = event => socket.send(JSON.stringify({ session: 'stickers', ...event }))
+  send({ type: 'message', message: { id: 'sticker', author: 'Alice', original: 'Happy sticker', role: 'normal', time: new Date().toISOString(), content_parts: [
+    { type: 'sticker', text: 'Happy sticker', url: 'https://lh3.googleusercontent.com/test-sticker', width: 20000, height: 10000 },
+  ] } })
+  const image = page.locator('[data-message-id="sticker"] img.chat-sticker')
+  await expect(image).toBeVisible()
+  const bounds = await image.boundingBox()
+  expect(bounds.width).toBeLessThanOrEqual(256)
+  expect(bounds.height).toBeLessThanOrEqual(160)
+  send({ type: 'delete', ids: ['sticker'] })
+  send({ type: 'translation', id: 'sticker', translation: 'late' })
+  await expect(page.locator('[data-message-id="sticker"]')).toHaveCount(0)
+})
+
+
+test('offline demo emotes load in preview and OBS and scale with text', async ({ page, context }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: '体验演示' }).click()
+  const image = page.frameLocator('iframe').locator('[data-message-id="demo-0"] #message img.emoji')
+  await expect(image).toHaveAttribute('src', '/emotes/sakura.svg')
+  await expect.poll(() => image.evaluate(img => img.complete && img.naturalWidth > 0)).toBe(true)
+  const before = await image.boundingBox()
+  await page.locator('#font-size').fill('36')
+  await expect.poll(async () => (await image.boundingBox()).height).toBeGreaterThan(before.height)
+  const overlay = await context.newPage()
+  await overlay.goto('/overlay')
+  await expect(overlay.locator('[data-message-id="demo-0"] #message img.emoji')).toHaveAttribute('src', '/emotes/sakura.svg')
+  await overlay.close()
+})

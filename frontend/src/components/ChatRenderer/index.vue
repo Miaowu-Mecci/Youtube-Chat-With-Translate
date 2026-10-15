@@ -18,6 +18,7 @@
                 :authorType="message.authorType"
                 :privilegeType="message.privilegeType"
                 :contentParts="message.contentParts"
+                @content-resize="onContentResize"
                 :translation="message.translation"
                 :translations="message.translations"
                 :messageId="message.id"
@@ -273,6 +274,9 @@ export default {
       if (!this.atBottom) {
         this.scrollToBottom()
       }
+    },
+    onContentResize() {
+      this.$nextTick(() => { this.maybeResizeScrollContainer(); this.maybeScrollToBottom() })
     },
     updateMessage(id, newValuesObj) {
       // A translation for an existing row should not wait behind new-chat scrolling.

@@ -6,6 +6,7 @@ import grpc
 import httpx
 from google.protobuf.json_format import MessageToDict
 
+from .message_content import normalize_parts, plain_text
 from .proto import stream_list_pb2 as pb
 from .proto import stream_list_pb2_grpc as rpc
 
@@ -60,9 +61,18 @@ def map_item(item: dict) -> dict | None:
         return {"type": "ban", "author_id": snippet.get("userBannedDetails", {}).get("bannedUserDetails", {}).get("channelId", "")}
     if kind in {"CHAT_ENDED_EVENT", "chatEndedEvent"}:
         return {"type": "ended"}
-    if kind not in {"TEXT_MESSAGE_EVENT", "textMessageEvent"} or not mid:
+    sticker = kind in {"SUPER_STICKER_EVENT", "superStickerEvent"}
+    if (kind not in {"TEXT_MESSAGE_EVENT", "textMessageEvent"} and not sticker) or not mid:
         return None
     text = snippet.get("textMessageDetails", {}).get("messageText", snippet.get("displayMessage", ""))
+    parts = normalize_parts(item["content_parts"]) if "content_parts" in item else None
+    if sticker:
+        meta = snippet.get("superStickerDetails", {}).get("superStickerMetadata", {})
+        label = meta.get("altText") or "[贴纸]"
+        # The official API exposes sticker metadata, without an image URL.
+        parts = [{"type": "sticker", "text": label, "id": meta.get("stickerId", ""), "url": "", "width": 128, "height": 128}]
+    if parts is not None:
+        text = plain_text(parts)
     avatar = author.get("profileImageUrl", "")
     if not avatar.startswith("https://"):
         avatar = ""
@@ -72,6 +82,7 @@ def map_item(item: dict) -> dict | None:
         "author": author.get("displayName", "观众"), "avatar": avatar, "role": role,
         "time": snippet.get("publishedAt", ""), "original": text, "translation": "",
         "source_language": "", "translation_status": "skipped",
+        **({"content_parts": parts} if parts is not None else {}),
     }}
 
 

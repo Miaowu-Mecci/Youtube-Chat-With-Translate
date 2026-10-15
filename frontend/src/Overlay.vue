@@ -5,6 +5,7 @@
 <script>
 import ChatRenderer from './components/ChatRenderer/index.vue'
 import { makeCSS } from './style'
+import { contentParts } from './content'
 
 const defaults = { font_size: 24, color: '#ffffff', translation_color: '#8de1cb', show_avatar: true, max_messages: 100, custom_css: '' }
 export default {
@@ -37,7 +38,7 @@ export default {
       return { id: message.id, type: 0, authorName: message.author, avatarUrl: message.avatar,
         time: new Date(message.time), authorType: { normal: 0, member: 1, moderator: 2, owner: 3 }[message.role] || 0,
         privilegeType: 0, repeated: 1, content: message.original, translation: message.translation, translations: message.translations || [],
-        contentParts: [{ type: 0, text: message.original }] }
+        contentParts: contentParts(message) }
     },
     connect() {
       const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`)

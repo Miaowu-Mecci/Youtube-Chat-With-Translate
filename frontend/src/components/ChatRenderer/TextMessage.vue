@@ -11,13 +11,13 @@
       <span id="message" class="style-scope yt-live-chat-text-message-renderer">
         <template v-for="(content, index) in contentParts">
           <span :key="index" v-if="content.type === CONTENT_PART_TYPE_TEXT">{{ content.text }}</span>
-          <!-- 如果CSS设置的尺寸比属性设置的尺寸还大，在图片加载完后布局会变化，可能导致滚动卡住，没什么好的解决方法 -->
-          <img :key="index" v-else-if="content.type === CONTENT_PART_TYPE_IMAGE"
-            class="emoji yt-formatted-string style-scope yt-live-chat-text-message-renderer"
-            :src="content.url" :alt="content.text" :shared-tooltip-text="content.text" :id="`emoji-${content.text}`"
-            :width="content.width" :height="content.height"
-            :class="{ 'blc-large-emoji': content.height >= 100 }"
-          >
+          <span :key="index" v-else-if="content.type === CONTENT_PART_TYPE_IMAGE" class="emote-part" :class="{ 'sticker-part': content.kind === 'sticker' }">
+            <img v-if="!failedImages[content.url]" class="emoji yt-formatted-string style-scope yt-live-chat-text-message-renderer"
+              :class="{ 'chat-sticker': content.kind === 'sticker' }" :src="content.url" :alt="content.text" :title="content.text"
+              :width="content.width" :height="content.height" :style="imageStyle(content)" referrerpolicy="no-referrer"
+              @load="$emit('content-resize')" @error="imageFailed(content.url)">
+            <span v-else class="emote-fallback" :title="'表情图片加载失败'">{{ content.text }}</span>
+          </span>
         </template>
 
       </span>
@@ -63,9 +63,19 @@ export default {
   },
   data() {
     return {
+      failedImages: {},
       CONTENT_PART_TYPE_TEXT: constants.CONTENT_PART_TYPE_TEXT,
       CONTENT_PART_TYPE_IMAGE: constants.CONTENT_PART_TYPE_IMAGE
     }
+  },
+  methods: {
+    imageStyle(part) {
+      const size = part.kind === 'sticker' ? 4 : 1.35
+      const ratio = Math.max(.25, Math.min(4, part.width / part.height))
+      return { height: `${size}em`, width: `${size * ratio}em`, maxHeight: part.kind === 'sticker' ? '160px' : 'none',
+        maxWidth: part.kind === 'sticker' ? 'min(100%, 256px)' : '5.4em', objectFit: 'contain', verticalAlign: 'middle' }
+    },
+    imageFailed(url) { this.$set(this.failedImages, url, true); this.$emit('content-resize') }
   },
   computed: {
     timeText() {

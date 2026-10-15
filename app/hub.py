@@ -5,8 +5,9 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from .config import Config
+from .message_content import translation_text, DEMO_IMAGE
 from .demo import DEMO_SAMPLES, demo_translation
-from .translation import AzureTranslator, GoogleWebTranslator, TranslationError, TranslationPool, Result
+from .translation import AzureTranslator, GoogleWebTranslator, TranslationError, TranslationPool, Result, should_translate
 from .youtube import SourceError, map_item
 
 
@@ -160,7 +161,7 @@ class ChatHub:
                         if message["translation_status"] != "complete":
                             for row in message.get("translations", []):
                                 if row["status"] != "complete":
-                                    state = self.pool.submit_target(message["id"], message["original"], row["language"])
+                                    state = self.pool.submit_target(message["id"], translation_text(message), row["language"])
                                     if state != "complete":
                                         self.translated(message["id"], None, state, row["language"])
                 else:
@@ -276,13 +277,13 @@ class ChatHub:
                     self.pool = None
                 for message in self.messages.values():
                     message.update(translation="", translations=(self.translation_rows("skipped")
-                                   if config.translation_enabled or self.mode == "demo" else []),
+                                   if self.mode == "demo" or (config.translation_enabled and should_translate(translation_text(message))) else []),
                                    source_language="", translation_status="skipped")
                 if self.mode != "idle":
                     await self.setup_translation()
                     if self.pool:
                         for message in self.messages.values():
-                            message["translation_status"] = self.pool.submit(message["id"], message["original"])
+                            message["translation_status"] = self.submit_translation(message)
                     elif self.mode == "demo":
                         for mid in self.messages:
                             self.translate_demo(mid)
@@ -297,21 +298,29 @@ class ChatHub:
         if len(collection) > limit:
             collection.popitem(last=False)
 
+    def submit_translation(self, message):
+        value = translation_text(message)
+        if not should_translate(value):
+            message["translations"] = []
+            return "skipped"
+        return self.pool.submit(message["id"], value)
+
     def add(self, message: dict):
         mid = message["id"]
         if mid in self.seen or mid in self.deleted:
             return
         self.remember(self.seen, mid)
-        message.setdefault("translations", self.translation_rows() if self.pool or self.mode == "demo" else [])
+        translatable = should_translate(translation_text(message))
+        message.setdefault("translations", self.translation_rows() if (self.pool and translatable) or self.mode == "demo" else [])
         self.messages[mid] = message
         while len(self.messages) > self.config.style.max_messages:
             self.messages.popitem(last=False)
         # Publish first, so even cached translation events can never precede the original.
-        if self.pool:
+        if self.pool and translatable:
             message["translation_status"] = "pending"
         self.publish({"type": "message", "message": message})
         if self.pool:
-            state = self.pool.submit(mid, message["original"])
+            state = self.submit_translation(message)
             if state != "pending":
                 message["translation_status"] = state
                 self.publish({"type": "translation", "id": mid, "translation": message["translation"],
@@ -419,7 +428,10 @@ class ChatHub:
         while True:
             author, original, translation, language = DEMO_SAMPLES[index % len(DEMO_SAMPLES)]
             mid = f"demo-{index}"
-            self.add({"id": mid, "author_id": author, "author": author, "avatar": "/avatar.svg",
+            parts = ([{"type": "text", "text": original[:-1]},
+                      {"type": "emoji", "text": "🌸", "url": DEMO_IMAGE, "width": 48, "height": 48}]
+                     if original.endswith("🌸") else [{"type": "text", "text": original}])
+            self.add({"id": mid, "content_parts": parts, "author_id": author, "author": author, "avatar": "/avatar.svg",
                       "role": "moderator" if index % 6 == 0 else "normal", "time": datetime.now(timezone.utc).isoformat(),
                       "original": original, "translation": "", "source_language": "", "translation_status": "pending"})
             await asyncio.sleep(0.7)

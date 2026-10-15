@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import httpx
 
 from .youtube import Batch, SourceError, YouTubeSource, parse_source
+from .message_content import parse_runs, plain_text, image_part
 
 
 def json_objects(html: str, pattern: str):
@@ -114,12 +115,7 @@ def continuation(data):
 
 
 def text(value):
-    if not isinstance(value, dict):
-        return ""
-    return value.get("simpleText", "") or "".join(
-        run.get("text", "") or next(iter(run.get("emoji", {}).get("shortcuts", [])), "")
-        for run in value.get("runs", [])
-    )
+    return plain_text(parse_runs(value))
 
 
 def map_action(action):
@@ -132,7 +128,8 @@ def map_action(action):
     if "markChatItemsByAuthorAsDeletedAction" in action:
         return {"snippet": {"type": "userBannedEvent", "userBannedDetails": {"bannedUserDetails": {
             "channelId": action["markChatItemsByAuthorAsDeletedAction"].get("externalChannelId", "")}}}}
-    renderer = action.get("addChatItemAction", {}).get("item", {}).get("liveChatTextMessageRenderer")
+    item = action.get("addChatItemAction", {}).get("item", {})
+    renderer = item.get("liveChatTextMessageRenderer") or item.get("liveChatPaidMessageRenderer") or item.get("liveChatPaidStickerRenderer")
     if not renderer or not renderer.get("id"):
         return None
     try:
@@ -142,8 +139,13 @@ def map_action(action):
     badges = {badge.get("liveChatAuthorBadgeRenderer", {}).get("icon", {}).get("iconType", "")
               for badge in renderer.get("authorBadges", [])}
     thumbnails = renderer.get("authorPhoto", {}).get("thumbnails", [])
-    return {"id": renderer["id"], "snippet": {"type": "textMessageEvent", "publishedAt": published,
-            "textMessageDetails": {"messageText": text(renderer.get("message"))}},
+    parts = parse_runs(renderer.get("message"))
+    if "liveChatPaidStickerRenderer" in item:
+        sticker = renderer.get("sticker") or {}
+        label = sticker.get("accessibility", {}).get("accessibilityData", {}).get("label", "[贴纸]")
+        parts = [image_part(sticker, label if isinstance(label, str) else "[贴纸]", "sticker")]
+    return {"id": renderer["id"], "content_parts": parts, "snippet": {"type": "textMessageEvent", "publishedAt": published,
+            "textMessageDetails": {"messageText": plain_text(parts)}},
             "authorDetails": {"channelId": renderer.get("authorExternalChannelId", ""),
                 "displayName": text(renderer.get("authorName")) or "观众",
                 "profileImageUrl": thumbnails[-1].get("url", "") if thumbnails else "",

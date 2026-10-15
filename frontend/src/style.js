@@ -19,6 +19,10 @@ yt-live-chat-text-message-renderer .translation-placeholder { color: ${style.tra
 yt-live-chat-text-message-renderer .translation-row .translation { margin: 0; flex: 1; min-width: 0; }
 yt-live-chat-text-message-renderer #author-photo { display: ${style.show_avatar ? 'block' : 'none'}; }
 yt-live-chat-text-message-renderer #message { white-space: pre-wrap; }
+yt-live-chat-text-message-renderer .emote-part { display: inline; }
+yt-live-chat-text-message-renderer .sticker-part { display: inline-block; max-width: 100%; }
+yt-live-chat-text-message-renderer .emote-fallback { font-size: .8em; opacity: .75; }
+yt-live-chat-text-message-renderer #message .emoji { margin: 0 2px; }
 }
 ${style.custom_css || ''}`
 }

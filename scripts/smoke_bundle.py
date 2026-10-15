@@ -48,6 +48,7 @@ def smoke(binary: Path):
                 for asset in assets:
                     assert request(asset)
                 assert b'<svg' in request("/avatar.svg")
+                assert b'<svg' in request("/emotes/sakura.svg")
                 config = json.loads(request("/api/config"))
                 assert config["youtube_provider"] == "web"
                 assert config["translation_provider"] == "google_web"
@@ -92,9 +93,10 @@ def smoke(binary: Path):
                         message = next(message for message in snapshot["messages"] if message["id"] == mid)
                         assert [row["language"] for row in message["translations"]] == reordered
                         assert all(row["status"] == "complete" and row["text"] for row in message["translations"])
+                        assert any(part["type"] == "emoji" and part["url"] == "/emotes/sakura.svg" for part in message["content_parts"])
                 asyncio.run(check_reordered_snapshot())
                 request("/api/disconnect", "POST")
-                print("Bundle smoke test passed: assets, free-chat/Google defaults, configuration, multilingual demo and language reordering.")
+                print("Bundle smoke test passed: assets, free-chat/Google defaults, configuration, multilingual demo, emote asset/content and language reordering.")
             finally:
                 if sys.platform == "win32" and process.poll() is None:
                     # A onefile bundle has a bootloader parent and an application child.

@@ -27,4 +27,11 @@
 
 Python 运行依赖固定在 `requirements.txt`，前端依赖固定在 `frontend/package-lock.json`。各依赖保留其自身许可证。
 
-为复用上游组件，前端使用 Vue 2.7.16。`npm audit` 仍报告 Vue 2 模板解析器的低风险 ReDoS 项及其构建插件关联项；项目使用构建时预编译模板，运行时不会编译弹幕或用户 HTML。消息和译文仅以文本插值呈现。Vue 2 上游已停止常规维护，后续可单独计划迁移渲染组件。
+为复用上游组件，前端使用 Vue 2.7.16。`npm audit` 仍报告 Vue 2 模板解析器的低风险 ReDoS 项及其构建插件关联项；项目使用构建时预编译模板，运行时不会编译弹幕或用户 HTML。消息文字和译文以文本插值呈现；表情/贴纸使用校验后的图片 URL，通过 img 元素展示，不把消息当作 HTML。Vue 2 上游已停止常规维护，后续可单独计划迁移渲染组件。
+
+## YouTube 表情协议参考
+
+- 公开实现参考：[chat-downloader 的 YouTube 适配](https://github.com/xenova/chat-downloader/blob/94ed3fe9dd2af8f193ea5b25adc7509a8cbb0e63/chat_downloader/sites/youtube.py)，上游许可 MIT，查阅日期 2026-10-15。
+- 参考 `message.runs[].emoji` 的 `emojiId`、`shortcuts`、`image.thumbnails`、`isCustomEmoji`，以及 `liveChatPaidStickerRenderer.sticker` 的消息结构。新增代码独立实现，未引入该项目依赖或复制其源码。
+- YouTube 官方 API 的贴纸信息参考随项目保存的官方 protobuf `SuperStickerMetadata`；该字段没有图片 URL，因此官方模式仅显示可获得的贴纸描述，不猜测图片地址。
+- 表情和贴纸图片由上游消息提供的 YouTube/Google CDN 地址加载，权利归原作者或平台所有。离线演示的 `frontend/public/emotes/sakura.svg` 为本项目自行绘制的示例。

@@ -191,6 +191,9 @@ def create_app(config_path: Path | None = None, source_factory=ChatSource):
     if (dist / "assets").exists():
         app.mount("/assets", StaticFiles(directory=dist / "assets"), name="assets")
 
+    if (dist / "emotes").exists():
+        app.mount("/emotes", StaticFiles(directory=dist / "emotes"), name="emotes")
+
     @app.get("/avatar.svg")
     async def avatar():
         return FileResponse(ROOT / "frontend" / "public" / "avatar.svg", media_type="image/svg+xml")

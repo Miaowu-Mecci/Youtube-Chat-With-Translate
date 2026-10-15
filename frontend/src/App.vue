@@ -10,7 +10,7 @@
       <div class="side-bottom"><span class="local-dot"></span> 本地运行<span class="side-note">你的直播，你的表达。</span></div>
     </aside>
     <main class="workspace">
-      <header class="topbar"><span>工作空间 <span class="crumb">/</span> 直播弹幕</span><span class="version">v0.2.1 · MULTILINGUAL</span></header>
+      <header class="topbar"><span>工作空间 <span class="crumb">/</span> 直播弹幕</span><span class="version">v0.3.0 · MULTILINGUAL</span></header>
       <div class="page-title"><div><div class="eyebrow">CONNECT WITHOUT LANGUAGE BARRIERS</div><h1>让每一句话，都被听懂<span>。</span></h1><p>将 YouTube 直播弹幕带入 OBS，让每一种语言都有位置。</p></div><button class="secondary" :disabled="busy" @click="action('demo', true)">▷ 体验演示</button></div>
       <div class="toast" role="status" v-if="notice">{{ notice }}</div>
       <div class="columns">
