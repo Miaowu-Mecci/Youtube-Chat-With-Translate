@@ -283,6 +283,8 @@ test('original stays above ordered translations including an identical source-la
   rows[0] = { language: 'zh-Hans', text: '你好', status: 'complete' }
   send({ type: 'translation', id: 'multi-one', translations: rows })
   await expect(page.locator('.translation')).toHaveText(['你好', 'Hello'])
+  await expect(page.locator('.translation-row')).toHaveText(['你好', 'Hello'])
+  await expect(page.locator('.translation-language')).toHaveCount(0)
   const positions = await page.locator('[data-message-id="multi-one"]').evaluate(el => ({
     original: el.querySelector('#message').getBoundingClientRect().top,
     rows: [...el.querySelectorAll('.translation')].map(row => row.getBoundingClientRect().top),

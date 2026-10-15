@@ -23,7 +23,7 @@
 
 **下载已发布版本**：在仓库的 Releases 页面下载 `YouTubeOBSChat-Windows-x64.zip`，解压后运行其中的 `YouTubeOBSChat.exe`；压缩包包含使用文档和第三方许可证。也提供单独的 EXE 和 `SHA256SUMS.txt` 校验文件。
 
-**v0.3.0 表情支持版**：在 Releases 下载 `YouTubeOBSChat-Windows-x64.zip` 或 `YouTubeOBSChat.exe`。新增频道自定义表情、文字与表情混排、YouTube 贴纸图片展示及图片失败回退；保留此前演示、网页解析和多语言翻译修复。退出旧程序后替换 EXE，并刷新设置页与 OBS 浏览器源。
+**v0.3.1 表情与简洁译文版**：在 Releases 下载 `YouTubeOBSChat-Windows-x64.zip` 或 `YouTubeOBSChat.exe`。新增频道自定义表情、文字与表情混排、YouTube 贴纸图片展示及图片失败回退；保留此前演示、网页解析和多语言翻译修复。退出旧程序后替换 EXE，并刷新设置页与 OBS 浏览器源。
 
 **GitHub 构建**：在 Actions 中选择 **Build Windows EXE → Run workflow**，构建通过后下载 `YouTubeOBSChat-Windows-x64` artifact。推送 `v*` 版本标签时，CI 在 Windows x64 上运行自动测试、生成 EXE 并实际启动验证，全部通过后自动创建 Release 并上传 EXE、发行压缩包及 SHA-256 校验文件；手动构建仅生成 artifact。
 
@@ -54,11 +54,11 @@ Windows EXE 必须由 Windows 本机构建或 Actions Windows runner 生成；�
 
 ```text
 XXX: 你好
-  · zh-Hans  你好
-  · en       Hello
+  · 你好
+  · Hello
 ```
 
-每种语言都有独立的完成/等待/失败状态，完成后在原行更新，不重排消息。即使译文与原文相同，也保留该语言行。失败时保留原文与其他成功译文；「恢复翻译」只重新提交未完成语言。Google 请求共用单并发和至少一秒间隔，缓存按「正文 + 目标语言」区分，重复请求合并；选择更多语言会增加等待时间。Google 网页接口无需 Key，但可能限流或变化，不保证永久免费可用。
+译文行只显示内容，不显示语言代码；顺序仍由语言设置决定。每种语言都有独立的完成/等待/失败状态，完成后在原行更新，不重排消息。即使译文与原文相同，也保留该语言行。失败时保留原文与其他成功译文；「恢复翻译」只重新提交未完成语言。Google 请求共用单并发和至少一秒间隔，缓存按「正文 + 目标语言」区分，重复请求合并；选择更多语言会增加等待时间。Google 网页接口无需 Key，但可能限流或变化，不保证永久免费可用。
 
 「保存并测试翻译」会逐一测试选中的所有语言。演示提供全部八种常用目标语言的固定译文，无需联网；Azure 额外提供的其他语言显示「演示暂无该语言样例」。演示不能证明真实服务可用。
 

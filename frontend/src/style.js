@@ -14,7 +14,6 @@ yt-live-chat-text-message-renderer { margin: 4px 8px; border-radius: 12px; backg
 yt-live-chat-text-message-renderer .translation-list { padding: 4px 0 0 14px; margin: 6px 0 0; border-left: 2px solid #8de1cb55; list-style: none; }
 yt-live-chat-text-message-renderer .translation-row { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; }
 yt-live-chat-text-message-renderer .translation-row::before { content: "·"; color: ${style.translation_color}; }
-yt-live-chat-text-message-renderer .translation-language { color: ${style.translation_color}; font-size: 10px; opacity: .6; min-width: 38px; }
 yt-live-chat-text-message-renderer .translation-placeholder { color: ${style.translation_color}; font-size: 12px; opacity: .5; }
 yt-live-chat-text-message-renderer .translation-row .translation { margin: 0; flex: 1; min-width: 0; }
 yt-live-chat-text-message-renderer #author-photo { display: ${style.show_avatar ? 'block' : 'none'}; }
