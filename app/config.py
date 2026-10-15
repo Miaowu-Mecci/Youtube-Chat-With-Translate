@@ -26,18 +26,20 @@ class Config(BaseModel):
     source: str = Field(default="", max_length=2048)
     translation_enabled: bool = False
     target_language: str = Field(default="zh-Hans", pattern=r"^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$")
-    target_languages: list[str] | None = Field(default=None, min_length=1, max_length=8)
+    target_languages: list[str] | None = Field(default=None, max_length=8)
     style: Style = Field(default_factory=Style)
 
     @model_validator(mode="after")
     def normalize_target(self):
         supported = {item["code"] for item in GOOGLE_LANGUAGES}
-        targets = self.target_languages or [self.target_language]
+        # An omitted list imports the legacy single target; an explicit [] means original only.
+        targets = [self.target_language] if self.target_languages is None else self.target_languages
         if any(not re.fullmatch(r"[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*", code) for code in targets):
             raise ValueError("Invalid target language")
-        targets = [code for code in targets if code in supported] or ["zh-Hans"]
+        targets = ([code for code in targets if code in supported] or ["zh-Hans"]) if targets else []
         self.target_languages = list(dict.fromkeys(targets))
-        self.target_language = self.target_languages[0]
+        self.target_language = self.target_languages[0] if self.target_languages else (
+            self.target_language if self.target_language in supported else "zh-Hans")
         return self
 
     def public(self):

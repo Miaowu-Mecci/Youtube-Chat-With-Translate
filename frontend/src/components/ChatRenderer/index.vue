@@ -9,6 +9,7 @@
           <div ref="items" id="items" class="style-scope yt-live-chat-item-list-renderer" style="overflow: hidden"
             :style="{ transform: `translateY(${Math.floor(scrollPixelsRemaining)}px)` }"
           >
+            <slot name="start"></slot>
             <template v-for="message in messages">
               <text-message :key="message.id" v-if="message.type === MESSAGE_TYPE_TEXT"
                 class="style-scope yt-live-chat-item-list-renderer"

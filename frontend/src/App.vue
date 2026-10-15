@@ -38,14 +38,15 @@
                 <div class="language-actions">
                   <button :aria-label="'上移 ' + languageName(code)" :disabled="index === 0" @click="moveLanguage(index, index - 1)">↑</button>
                   <button :aria-label="'下移 ' + languageName(code)" :disabled="index === form.target_languages.length - 1" @click="moveLanguage(index, index + 1)">↓</button>
-                  <button :aria-label="'移除 ' + languageName(code)" :disabled="form.target_languages.length === 1" @click="removeLanguage(index)">×</button>
+                  <button :aria-label="'移除 ' + languageName(code)" @click="removeLanguage(index)">×</button>
                 </div>
               </li>
             </ol>
+            <p v-if="!form.target_languages.length" class="small" aria-label="无目标语言">未选择翻译语言，仅显示原文。</p>
             <div class="add-language"><select id="language" v-model="languageToAdd" aria-label="添加目标语言"><option value="" disabled>＋ 添加一种语言</option><option v-for="language in availableLanguages" :key="language.code" :value="language.code">{{ language.name }} · {{ language.code }}</option></select><button class="secondary" :disabled="!languageToAdd || form.target_languages.length >= 8" @click="addLanguage">添加</button></div>
             <p class="small">拖动语言卡片或使用 ↑ ↓ 调整顺序，保存后同步到 OBS。最多选择 8 种；每种语言单独请求，语言越多，翻译等待越长。</p>
-            <div class="translation-flow"><span>原文</span><span>→</span><strong>{{ targetName }}</strong><span class="flow-badge">按序逐行显示</span></div>
-            <div class="button-row"><button class="secondary" :disabled="busy" @click="testTranslation">保存并测试翻译</button><button class="secondary" :disabled="busy" @click="resumeTranslation">恢复翻译</button></div>
+            <div class="translation-flow"><template v-if="form.target_languages.length"><span>原文</span><span>→</span></template><strong>{{ targetName }}</strong><span v-if="form.target_languages.length" class="flow-badge">按序逐行显示</span></div>
+            <div class="button-row"><button class="secondary" :disabled="busy || !form.target_languages.length" @click="testTranslation">保存并测试翻译</button><button class="secondary" :disabled="busy || !form.target_languages.length" @click="resumeTranslation">恢复翻译</button></div>
             <p class="small">测试会向 Google 发送固定外语样例，不需要连接 YouTube。测试翻译不受弹幕翻译开关控制。</p>
             <p class="connection-message" role="status" aria-label="翻译测试结果" v-if="testResult">{{ testResult }}</p>
             <p class="connection-message">{{ status.translation_message }}</p>
@@ -88,7 +89,7 @@ export default {
   computed: {
     overlayUrl() { return `${location.origin}/overlay` },
     css() { return makeCSS(this.form.style) },
-    targetName() { return this.form.target_languages.map(this.languageName).join(' → ') },
+    targetName() { return this.form.target_languages.map(this.languageName).join(' → ') || '仅显示原文' },
     availableLanguages() { return this.languages.filter(item => !this.form.target_languages.includes(item.code)) },
     statusLabel() { return { idle: '未连接', connecting: '连接中', connected: '已连接', reconnecting: '重连中', demo: '演示中', error: '连接异常', ended: '已结束' }[this.status.connection] || '未连接' }
   },
@@ -128,7 +129,7 @@ export default {
       if (this.languageToAdd && this.form.target_languages.length < 8 && !this.form.target_languages.includes(this.languageToAdd)) this.form.target_languages.push(this.languageToAdd)
       this.languageToAdd = ''
     },
-    removeLanguage(index) { if (this.form.target_languages.length > 1) this.form.target_languages.splice(index, 1) },
+    removeLanguage(index) { this.form.target_languages.splice(index, 1) },
     moveLanguage(from, to) {
       if (to < 0 || to >= this.form.target_languages.length || from === to) return
       const [code] = this.form.target_languages.splice(from, 1)
@@ -157,7 +158,7 @@ export default {
     async persist() {
       if (!this.ready) throw new Error('配置尚未加载，请刷新页面后重试。')
       const payload = JSON.parse(JSON.stringify(this.form))
-      payload.target_language = payload.target_languages[0]
+      if (payload.target_languages.length) payload.target_language = payload.target_languages[0]
       this.loadConfig(await this.api('/api/config', 'PUT', payload))
     },
     async save() {

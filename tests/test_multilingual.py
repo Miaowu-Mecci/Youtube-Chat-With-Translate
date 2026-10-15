@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from app.config import Config
+from app.config import Config, ConfigStore
 from app.hub import ChatHub
 from app.server import create_app
 from app.translation import Result, TranslationError, TranslationPool
@@ -20,7 +20,8 @@ def test_target_config_order_duplicates_migration_and_validation():
     assert Config(target_languages=['en', 'zh-Hans', 'en']).target_languages == ['en', 'zh-Hans']
     assert Config(target_languages=['en', 'zh-Hans']).target_language == 'en'
     assert Config(target_language='ja').target_languages == ['ja']
-    for value in [[], ['bad_language'], ['en'] * 9]:
+    assert Config(target_languages=[]).target_languages == []
+    for value in [['bad_language'], ['en'] * 9]:
         with pytest.raises(ValidationError):
             Config(target_languages=value)
 
@@ -30,11 +31,95 @@ def test_api_persists_order_and_supports_old_single_target_clients(tmp_path):
         saved = client.put('/api/config', json={'target_languages': ['en', 'zh-Hans']}).json()
         assert saved['target_languages'] == ['en', 'zh-Hans'] and saved['target_language'] == 'en'
         assert 'youtube_provider' not in saved and 'youtube_key' not in saved
-        assert client.put('/api/config', json={'target_languages': []}).status_code == 422
+        saved = client.put('/api/config', json={'target_languages': []}).json()
+        assert saved['target_languages'] == []
         saved = client.put('/api/config', json={'target_language': 'ja'}).json()
         assert saved['target_languages'] == ['ja']
     with TestClient(create_app(tmp_path / 'config.json')) as client:
         assert client.get('/api/config').json()['target_languages'] == ['ja']
+
+
+def test_empty_targets_survive_save_restart_and_unrelated_updates(tmp_path):
+    path = tmp_path / 'config.json'
+    store = ConfigStore(path)
+    store.save(Config(translation_enabled=True, target_languages=[]))
+    assert ConfigStore(path).config.target_languages == []
+    app = create_app(path)
+    with TestClient(app) as client:
+        assert client.get('/api/config').json()['target_languages'] == []
+        assert client.put('/api/config', json={'translation_enabled': True}).json()['target_languages'] == []
+        assert client.put('/api/config', json={'style': {'font_size': 36}}).json()['target_languages'] == []
+    assert ConfigStore(path).config.target_languages == []
+
+
+def test_no_target_diagnostic_and_resume_never_send_translation_requests(tmp_path, monkeypatch):
+    app = create_app(tmp_path / 'config.json')
+    async def unexpected(*args, **kwargs):
+        raise AssertionError('No language was selected')
+    with TestClient(app) as client:
+        monkeypatch.setattr(app.state.hub.google.client, 'get', unexpected)
+        assert client.put('/api/config', json={'target_languages': [], 'translation_enabled': True}).status_code == 200
+        result = client.post('/api/translation/test')
+        assert result.status_code == 422 and result.json()['code'] == 'no_targets'
+        assert '仅显示原文' in result.json()['detail']
+        resumed = client.post('/api/translation/resume').json()
+        assert resumed['translation'] == 'off'
+        assert app.state.hub.pool is None
+
+
+@pytest.mark.parametrize('mode', ['live', 'demo'])
+async def test_empty_targets_keep_original_without_pool_or_placeholder_rows(mode):
+    hub = ChatHub(Config(target_languages=[], translation_enabled=True), None, None)
+    hub.mode = mode
+    hub.provider = lambda: pytest.fail('No translation provider should be used')
+    await hub.setup_translation()
+    try:
+        hub.add(message('demo-0'))
+        if mode == 'demo':
+            hub.translate_demo('demo-0')
+        original = hub.snapshot()['messages'][0]
+        assert original['original'] == '你好'
+        assert original['translations'] == [] and original['translation'] == ''
+        assert original['translation_status'] == 'skipped'
+        assert hub.pool is None and hub.status['translation'] == 'off'
+    finally:
+        await hub.stop()
+
+
+async def test_removing_all_targets_cancels_pending_work_and_readding_resumes_without_reconnect():
+    started = asyncio.Event()
+    waiting = True
+    calls = []
+    class Provider:
+        async def translate(self, text, target):
+            calls.append((text, target))
+            started.set()
+            if waiting:
+                await asyncio.Event().wait()
+            return Result('translated', 'zh-Hans')
+    hub = ChatHub(Config(translation_enabled=True), None, None)
+    hub.provider = lambda: Provider()
+    hub.mode = 'live'
+    hub.task = asyncio.create_task(asyncio.Event().wait())
+    task, session = hub.task, hub.session
+    await hub.setup_translation()
+    try:
+        hub.add(message())
+        await asyncio.wait_for(started.wait(), 1)
+        await hub.configure(Config(translation_enabled=True, target_languages=[]))
+        hub.translated('one', Result('stale', 'en'), 'complete', 'zh-Hans')
+        hub.add(message('two', '欢迎'))
+        assert len(calls) == 1 and hub.pool is None
+        assert all(m['translations'] == [] and m['translation'] == '' for m in hub.messages.values())
+        assert hub.task is task and hub.session == session
+        waiting = False
+        await hub.configure(Config(translation_enabled=True, target_languages=['en']))
+        await asyncio.wait_for(hub.pool.queue.join(), 1)
+        assert calls == [('你好', 'zh-Hans'), ('你好', 'en'), ('欢迎', 'en')]
+        assert all(m['translations'][0]['text'] == 'translated' for m in hub.messages.values())
+        assert hub.task is task and hub.session == session
+    finally:
+        await hub.stop()
 
 
 async def test_same_language_kept_and_out_of_order_results_follow_selection():

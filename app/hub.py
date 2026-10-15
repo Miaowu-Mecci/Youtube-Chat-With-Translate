@@ -79,7 +79,7 @@ class ChatHub:
 
     def translated(self, mid: str, result: Result | None, status: str, target: str | None = None, reason: str = ""):
         message = self.messages.get(mid)
-        if message is None:
+        if message is None or (target or self.config.target_language) not in self.config.target_languages:
             return
         target = target or self.config.target_language
         rows = message.setdefault("translations", self.translation_rows())
@@ -103,7 +103,7 @@ class ChatHub:
         self.publish_progress()
 
     def google_state(self, state, message):
-        if self.mode != "demo":
+        if self.mode != "demo" and self.config.target_languages:
             self.translation_state(state, message)
 
     def provider(self):
@@ -116,6 +116,8 @@ class ChatHub:
 
     async def test_translation(self):
         async with self.lock:
+            if not self.config.target_languages:
+                raise TranslationError("no_targets")
             if self.test_task and not self.test_task.done():
                 raise TranslationError("busy")
             provider, target = self.provider(), self.config.target_language
@@ -147,6 +149,9 @@ class ChatHub:
     async def resume_translation(self):
         async with self.lock:
             await self.cancel_translation_test()
+            if not self.config.target_languages:
+                self.translation_state("off", "未选择目标语言，仅显示原文。")
+                return self.current_status()
             self.google.resume()
             if self.mode == "live" and self.task and not self.task.done():
                 await self.setup_translation()
@@ -168,7 +173,9 @@ class ChatHub:
         if self.pool:
             await self.pool.close()
             self.pool = None
-        if self.mode == "demo":
+        if not self.config.target_languages:
+            self.translation_state("off", "未选择目标语言，仅显示原文。")
+        elif self.mode == "demo":
             self.translation_state("demo", "演示使用八种语言的固定译文，不调用外部 API。")
         elif not self.config.translation_enabled:
             self.translation_state("off", "翻译未开启。")
@@ -280,7 +287,7 @@ class ChatHub:
                         for mid in self.messages:
                             self.translate_demo(mid)
                 else:
-                    self.translation_state("off", "连接后启动翻译。")
+                    self.translation_state("off", "连接后启动翻译。" if config.target_languages else "未选择目标语言，仅显示原文。")
             self.publish(self.snapshot())
 
     @staticmethod
@@ -304,6 +311,8 @@ class ChatHub:
         self.remember(self.seen, mid)
         translatable = should_translate(translation_text(message))
         message.setdefault("translations", self.translation_rows() if (self.pool and translatable) or self.mode == "demo" else [])
+        if not self.config.target_languages:
+            message.update(translations=[], translation="", translation_status="skipped")
         self.messages[mid] = message
         while len(self.messages) > self.config.style.max_messages:
             self.messages.popitem(last=False)

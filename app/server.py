@@ -72,7 +72,7 @@ def create_app(config_path: Path | None = None, source_factory=WebChatSource):
             incoming = await request.json()
             if not isinstance(incoming, dict):
                 raise ValueError()
-            # Omitted secret = keep; empty string = delete. Public indicators aren't writable fields.
+            # A partial update preserves omitted settings, including an explicit empty target list.
             values = store.config.model_dump()
             values.update(incoming)
             if "target_language" in incoming and "target_languages" not in incoming:
@@ -112,6 +112,7 @@ def create_app(config_path: Path | None = None, source_factory=WebChatSource):
             return await app.state.hub.test_translation()
         except TranslationError as error:
             messages = {
+                "no_targets": "未选择目标语言，仅显示原文；添加语言后即可测试翻译。",
                 "busy": "翻译请求正在进行，请稍后测试。",
                 "rate_limited": "翻译服务限流；Google 将等待 60 秒，请稍后测试。",
                 "cooldown": "Google 正在限流等待中，请稍后测试。",
@@ -121,7 +122,7 @@ def create_app(config_path: Path | None = None, source_factory=WebChatSource):
                 "stale": "配置或连接已改变，本次测试已取消，请重新测试。",
             }
             return JSONResponse({"code": error.code, "detail": messages.get(error.code, "翻译超时或服务暂不可用，请检查网络。")},
-                                status_code=409 if error.code in {"busy", "stale"} else 503)
+                                status_code=422 if error.code == "no_targets" else 409 if error.code in {"busy", "stale"} else 503)
 
     @app.post("/api/translation/resume")
     async def resume_translation():
