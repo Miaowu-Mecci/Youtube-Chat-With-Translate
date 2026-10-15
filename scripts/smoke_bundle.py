@@ -50,10 +50,9 @@ def smoke(binary: Path):
                 assert b'<svg' in request("/avatar.svg")
                 assert b'<svg' in request("/emotes/sakura.svg")
                 config = json.loads(request("/api/config"))
-                assert config["youtube_provider"] == "web"
-                assert config["translation_provider"] == "google_web"
+                assert not any(field in config for field in ("youtube_provider", "translation_provider", "youtube_key", "azure_key"))
                 assert not config["translation_enabled"]
-                assert len(json.loads(request("/api/languages?provider=google_web"))["languages"]) == 8
+                assert len(json.loads(request("/api/languages"))["languages"]) == 8
                 request("/api/config", "PUT", {"target_language": "ja"})
                 persisted = json.loads((Path(directory) / "config.json").read_text("utf-8"))
                 assert persisted["target_language"] == "ja"
@@ -63,7 +62,7 @@ def smoke(binary: Path):
                 persisted = json.loads((Path(directory) / "config.json").read_text("utf-8"))
                 assert persisted["target_languages"] == targets
                 clicked_at = datetime.now(timezone.utc).isoformat()
-                # No YouTube key: exercise the packaged API without external requests.
+                # Empty video source exercises the connect API without an external request.
                 connection = json.loads(request("/api/connect", "POST", {"started_at": clicked_at}))
                 assert connection["chat_started_at"] == clicked_at
                 assert connection["ignored_history"] == 0
@@ -96,7 +95,7 @@ def smoke(binary: Path):
                         assert any(part["type"] == "emoji" and part["url"] == "/emotes/sakura.svg" for part in message["content_parts"])
                 asyncio.run(check_reordered_snapshot())
                 request("/api/disconnect", "POST")
-                print("Bundle smoke test passed: assets, free-chat/Google defaults, configuration, multilingual demo, emote asset/content and language reordering.")
+                print("Bundle smoke test passed: assets, free-only defaults, configuration, multilingual demo, emote asset/content and language reordering.")
             finally:
                 if sys.platform == "win32" and process.poll() is None:
                     # A onefile bundle has a bootloader parent and an application child.

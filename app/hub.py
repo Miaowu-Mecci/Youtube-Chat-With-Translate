@@ -7,7 +7,7 @@ from uuid import uuid4
 from .config import Config
 from .message_content import translation_text, DEMO_IMAGE
 from .demo import DEMO_SAMPLES, demo_translation
-from .translation import AzureTranslator, GoogleWebTranslator, TranslationError, TranslationPool, Result, should_translate
+from .translation import GoogleWebTranslator, TranslationError, TranslationPool, Result, should_translate
 from .youtube import SourceError, map_item
 
 
@@ -103,15 +103,11 @@ class ChatHub:
         self.publish_progress()
 
     def google_state(self, state, message):
-        if self.config.translation_provider == "google_web" and self.mode != "demo":
+        if self.mode != "demo":
             self.translation_state(state, message)
 
     def provider(self):
-        if self.config.translation_provider == "google_web":
-            return self.google
-        if not self.config.azure_key or not self.config.azure_region:
-            raise TranslationError("missing_credentials")
-        return AzureTranslator(self.http_client, self.config.azure_key, self.config.azure_region)
+        return self.google
 
     async def cancel_translation_test(self):
         if self.test_task and not self.test_task.done():
@@ -138,7 +134,7 @@ class ChatHub:
             task = self.test_task
         try:
             rows = await task
-            return {"provider": self.config.translation_provider, "target_language": target,
+            return {"provider": "google_web", "target_language": target,
                     "original": sample, "translation": rows[0]["text"],
                     "source_language": rows[0]["source_language"], "translations": rows}
         except asyncio.CancelledError:
@@ -151,8 +147,7 @@ class ChatHub:
     async def resume_translation(self):
         async with self.lock:
             await self.cancel_translation_test()
-            if self.config.translation_provider == "google_web":
-                self.google.resume()
+            self.google.resume()
             if self.mode == "live" and self.task and not self.task.done():
                 await self.setup_translation()
                 if self.pool:
@@ -177,16 +172,14 @@ class ChatHub:
             self.translation_state("demo", "演示使用八种语言的固定译文，不调用外部 API。")
         elif not self.config.translation_enabled:
             self.translation_state("off", "翻译未开启。")
-        elif self.config.translation_provider == "azure" and (not self.config.azure_key or not self.config.azure_region):
-            self.translation_state("paused", "请填写 Azure Key 和区域；当前仅显示原文。")
         else:
             self.pool = TranslationPool(
                 self.provider(), self.config.target_languages, self.translated, self.translation_state,
-                concurrency=1 if self.config.translation_provider == "google_web" else 4,
+                concurrency=1,
                 is_current=lambda mid: mid in self.messages,
             )
             self.pool.start()
-            if self.config.translation_provider == "google_web" and self.google.paused:
+            if self.google.paused:
                 self.google.report_error("paused")
             else:
                 self.translation_state("active", "翻译运行中；可点击「保存并测试翻译」验证服务。")
@@ -242,12 +235,11 @@ class ChatHub:
     async def configure(self, config: Config):
         async with self.lock:
             old = self.config
-            source_changed = any(getattr(old, key) != getattr(config, key) for key in ("source", "source_type", "youtube_key", "youtube_provider"))
+            source_changed = old.source != config.source
             translation_changed = any(getattr(old, key) != getattr(config, key) for key in (
-                "translation_provider", "target_language", "target_languages", "translation_enabled", "azure_key", "azure_region"))
+                "target_language", "target_languages", "translation_enabled"))
             order_only = (translation_changed and set(old.target_languages) == set(config.target_languages)
-                          and all(getattr(old, key) == getattr(config, key) for key in (
-                              "translation_provider", "translation_enabled", "azure_key", "azure_region")))
+                          and old.translation_enabled == config.translation_enabled)
             if source_changed or translation_changed:
                 await self.cancel_translation_test()
             if source_changed:
@@ -367,15 +359,12 @@ class ChatHub:
     async def run_live(self):
         token, failures = "", 0
         try:
-            key = self.config.youtube_key if self.config.youtube_provider == "api" else ""
-            if self.config.youtube_provider == "api" and not key:
-                raise SourceError("credentials", "请先填写 YouTube API Key。")
-            chat_id = await self.source.resolve(self.config.source, self.config.source_type, key)
+            chat_id = await self.source.resolve(self.config.source)
             while True:
                 ended = False
                 received = False
                 try:
-                    async for batch in self.source.stream(chat_id, key, token):
+                    async for batch in self.source.stream(chat_id, token):
                         received = True
                         failures = 0
                         token = batch.token or token

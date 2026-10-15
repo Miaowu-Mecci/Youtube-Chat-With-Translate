@@ -29,7 +29,7 @@ def test_api_persists_order_and_supports_old_single_target_clients(tmp_path):
     with TestClient(create_app(tmp_path / 'config.json')) as client:
         saved = client.put('/api/config', json={'target_languages': ['en', 'zh-Hans']}).json()
         assert saved['target_languages'] == ['en', 'zh-Hans'] and saved['target_language'] == 'en'
-        assert saved['youtube_provider'] == 'web' and not saved['youtube_key_set']
+        assert 'youtube_provider' not in saved and 'youtube_key' not in saved
         assert client.put('/api/config', json={'target_languages': []}).status_code == 422
         saved = client.put('/api/config', json={'target_language': 'ja'}).json()
         assert saved['target_languages'] == ['ja']
@@ -209,13 +209,3 @@ async def test_demo_language_added_during_session_has_offline_translation():
         assert rows[1]['text'].startswith('Bonjour')
     finally:
         await hub.stop()
-
-
-def test_demo_explains_unsupported_azure_language():
-    hub = ChatHub(Config(translation_provider='azure', target_languages=['it', 'de']), None, None)
-    hub.mode = 'demo'
-    hub.add(message('demo-0'))
-    hub.translate_demo('demo-0')
-    italian, german = hub.messages['demo-0']['translations']
-    assert italian['status'] == 'skipped' and italian['reason'] == 'demo_unsupported'
-    assert german['status'] == 'complete' and german['text']

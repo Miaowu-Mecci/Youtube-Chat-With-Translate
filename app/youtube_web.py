@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from .youtube import Batch, SourceError, YouTubeSource, parse_source
+from .youtube import Batch, SourceError, parse_source
 from .message_content import parse_runs, plain_text, image_part
 
 
@@ -81,9 +81,9 @@ def find_chat_renderer(data):
 def check_page_access(html, player):
     lower = html.lower()
     if any(marker in lower for marker in ("g-recaptcha", "/sorry/index", "unusual traffic", "confirm you're not a bot", "confirm you’re not a bot")):
-        raise SourceError("verification_required", "YouTube 要求验证码或机器人验证，免费网页模式无法自动完成验证。请在浏览器检查此直播，或尝试官方 API。")
+        raise SourceError("verification_required", "YouTube 要求验证码或机器人验证，免费网页模式无法自动完成验证。请在浏览器检查此直播，请在浏览器检查当前网络和访问状态。")
     if re.search(r'<form[^>]+action=[\"\'][^\"\']*consent\.(?:youtube|google)\.com', lower):
-        raise SourceError("consent_required", "YouTube 返回隐私同意页面，未提供聊天数据；请检查所在网络的访问限制，或尝试官方 API。")
+        raise SourceError("consent_required", "YouTube 返回隐私同意页面，未提供聊天数据；请检查所在网络的访问限制，请在浏览器检查当前网络和访问状态。")
     status = player.get("playabilityStatus", {})
     code = status.get("status")
     if code == "LOGIN_REQUIRED":
@@ -158,7 +158,7 @@ class WebChatSource:
         self.client = client
         self.context = None
         self.initial = None
-        self.api_key = ""
+        self.page_key = ""
         self.client_name = "1"
         self.video = ""
 
@@ -185,19 +185,17 @@ class WebChatSource:
         if 300 <= response.status_code < 400:
             host = httpx.URL(response.headers.get("location", "")).host
             if host in {"consent.youtube.com", "consent.google.com"}:
-                raise SourceError("consent_required", "YouTube 要求隐私同意，未提供聊天数据；请检查网络访问限制，或尝试官方 API。")
+                raise SourceError("consent_required", "YouTube 要求隐私同意，未提供聊天数据；请检查网络访问限制，请在浏览器检查当前网络和访问状态。")
             if host == "accounts.google.com":
                 raise SourceError("login_required", "此视频要求登录，匿名免费网页模式无法读取聊天。")
         if response.status_code in {401, 403} or 300 <= response.status_code < 400:
-            raise SourceError("web_blocked", "YouTube 网页要求登录、同意隐私政策或拒绝访问；请检查网络，或切换官方 API。")
+            raise SourceError("web_blocked", "YouTube 网页要求登录、同意隐私政策或拒绝访问；请检查网络，并检查网页协议适配。")
         if response.status_code >= 400:
             raise SourceError("network", "YouTube 网页请求失败，请检查直播链接和网络。", response.status_code >= 500)
         return response
 
-    async def resolve(self, source, kind, key=""):
-        parsed, video = parse_source(source, "video" if kind == "auto" else kind)
-        if parsed != "video":
-            raise SourceError("invalid_source", "免费网页模式需要直播视频链接或视频 ID，不支持 liveChatId。")
+    async def resolve(self, source):
+        parsed, video = parse_source(source)
         self.context, self.initial = None, None
         self.video = video
         response = await self.request("GET", "/live_chat", params={"v": video, "is_popout": "1", "hl": "en"})
@@ -236,13 +234,13 @@ class WebChatSource:
         if not token:
             raise SourceError("chat_unavailable", "未取得实时聊天令牌；可能是聊天未开放或页面结构已变化。" + "；".join(diagnostics))
         if not isinstance(context, dict) or not isinstance(context.get("client"), dict) or not context["client"].get("clientVersion"):
-            raise SourceError("web_protocol", "YouTube 网页协议已变化，无法获取聊天客户端配置；请更新程序或切换官方 API。" + "；".join(diagnostics))
+            raise SourceError("web_protocol", "YouTube 网页协议已变化，无法获取聊天客户端配置；请更新程序并检查网页协议适配。" + "；".join(diagnostics))
         self.context, self.initial = context, renderer
-        self.api_key = cfg.get("INNERTUBE_API_KEY", "")
+        self.page_key = cfg.get("INNERTUBE_API_KEY", "")
         self.client_name = str(cfg.get("INNERTUBE_CONTEXT_CLIENT_NAME", 1))
         return video
 
-    async def stream(self, video, key="", token=""):
+    async def stream(self, video, token=""):
         if not token:
             token, delay = continuation(self.initial)
             initial = [item for action in self.initial.get("actions", []) if (item := map_action(action))]
@@ -252,8 +250,8 @@ class WebChatSource:
         while token:
             await asyncio.sleep(delay)
             params = {"prettyPrint": "false"}
-            if self.api_key:
-                params["key"] = self.api_key  # Public webpage client key, never a user's API credential.
+            if self.page_key:
+                params["key"] = self.page_key  # Public webpage client key, never a user's API credential.
             response = await self.request("POST", "/youtubei/v1/live_chat/get_live_chat", params=params, json={
                 "context": self.context, "continuation": token,
             })
@@ -262,19 +260,6 @@ class WebChatSource:
                 next_token, delay = continuation(data)
                 items = [item for action in data.get("actions", []) if (item := map_action(action))]
             except (ValueError, KeyError, TypeError, AttributeError):
-                raise SourceError("web_protocol", "YouTube 聊天响应格式变化或要求验证，请更新程序或切换官方 API。") from None
+                raise SourceError("web_protocol", "YouTube 聊天响应格式变化或要求验证，请更新程序并检查网页协议适配。") from None
             token = next_token
             yield Batch(items, token, offline=not token)
-
-
-class ChatSource:
-    """The hub supplies a key only when official API mode is explicitly selected."""
-    def __init__(self, client):
-        self.api, self.web = YouTubeSource(client), WebChatSource(client)
-
-    async def resolve(self, source, kind, key):
-        return await (self.api if key else self.web).resolve(source, kind, key)
-
-    async def stream(self, chat_id, key, token):
-        async for batch in (self.api if key else self.web).stream(chat_id, key, token):
-            yield batch

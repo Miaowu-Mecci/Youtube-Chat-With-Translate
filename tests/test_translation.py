@@ -3,7 +3,7 @@ import asyncio
 import httpx
 import pytest
 
-from app.translation import AzureTranslator, Result, TranslationError, TranslationPool, should_translate
+from app.translation import Result, TranslationError, TranslationPool, should_translate
 
 
 @pytest.mark.parametrize('text', ['', '  ', '🌸👍🏽 👨‍👩‍👧‍👦', '1234', 'https://example.com', 'www.example.com'])
@@ -16,23 +16,8 @@ def test_translate_unicode_letters(text):
     assert should_translate(text)
 
 
-async def test_azure_request_autodetect_and_language():
-    def respond(request):
-        assert 'from' not in request.url.params
-        assert request.url.params['to'] == 'zh-Hans'
-        assert request.headers['Ocp-Apim-Subscription-Key'] == 'SECRET'
-        return httpx.Response(200, json=[{'detectedLanguage': {'language': 'en'}, 'translations': [{'text': '你好'}]}])
-    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
-        assert await AzureTranslator(client, 'SECRET', 'eastasia').translate('hello', 'zh-Hans') == Result('你好', 'en')
 
 
-@pytest.mark.parametrize('code,expected', [(401, 'credentials_or_quota'), (403, 'credentials_or_quota'), (429, 'rate_limited'), (503, 'unavailable')])
-async def test_azure_error_mapping(code, expected):
-    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(code, text='SECRET'))) as client:
-        with pytest.raises(TranslationError) as error:
-            await AzureTranslator(client, 'SECRET', 'eastasia').translate('hello', 'zh-Hans')
-        assert error.value.code == expected
-        assert 'SECRET' not in str(error.value)
 
 
 async def test_coalescing_cache_and_queue_bound():
@@ -80,7 +65,7 @@ async def test_quota_failure_pauses_and_drains_without_more_calls():
     class Provider:
         async def translate(self, text, target):
             calls.append(text)
-            raise TranslationError('credentials_or_quota')
+            raise TranslationError('blocked')
     pool = TranslationPool(Provider(), 'ja', lambda *args: None, lambda *args: states.append(args), concurrency=1)
     pool.start()
     try:
@@ -124,13 +109,6 @@ async def test_close_cancels_inflight_and_suppresses_old_callbacks():
     assert not results and not pool.workers and not pool.pending
 
 
-@pytest.mark.parametrize('payload', [[], [{'detectedLanguage': None, 'translations': [{'text': 'hi'}]}],
-                                    [{'translations': [{'text': 123}]}], {'error': 'unexpected'}])
-async def test_malformed_provider_response_is_a_controlled_failure(payload):
-    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, json=payload))) as client:
-        with pytest.raises(TranslationError) as error:
-            await AzureTranslator(client, 'SECRET', 'eastasia').translate('hello', 'ja')
-        assert error.value.code == 'unavailable'
 
 
 async def test_other_workers_cannot_overwrite_a_paused_quota_state():
@@ -140,7 +118,7 @@ async def test_other_workers_cannot_overwrite_a_paused_quota_state():
         async def translate(self, text, target):
             if text == 'quota':
                 first_failed.set()
-                raise TranslationError('credentials_or_quota')
+                raise TranslationError('blocked')
             await first_failed.wait()
             await asyncio.sleep(.01)
             raise TranslationError('unavailable')

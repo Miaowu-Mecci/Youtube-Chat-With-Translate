@@ -24,35 +24,24 @@ class Style(BaseModel):
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
     source: str = Field(default="", max_length=2048)
-    source_type: str = Field(default="auto", pattern=r"^(auto|video|chat)$")
-    youtube_provider: str = Field(default="web", pattern=r"^(web|api)$")
-    youtube_key: str = Field(default="", max_length=512, repr=False)
     translation_enabled: bool = False
-    translation_provider: str = Field(default="google_web", pattern=r"^(google_web|azure)$")
-    azure_key: str = Field(default="", max_length=512, repr=False)
-    azure_region: str = Field(default="", max_length=64, pattern=r"^[a-zA-Z0-9-]*$")
     target_language: str = Field(default="zh-Hans", pattern=r"^[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*$")
     target_languages: list[str] | None = Field(default=None, min_length=1, max_length=8)
     style: Style = Field(default_factory=Style)
 
     @model_validator(mode="after")
     def normalize_target(self):
-        if self.translation_provider == "google_web" and self.target_language not in {item["code"] for item in GOOGLE_LANGUAGES}:
-            self.target_language = "zh-Hans"
+        supported = {item["code"] for item in GOOGLE_LANGUAGES}
         targets = self.target_languages or [self.target_language]
         if any(not re.fullmatch(r"[a-zA-Z]{2,3}(-[a-zA-Z0-9]{2,8})*", code) for code in targets):
             raise ValueError("Invalid target language")
-        if self.translation_provider == "google_web":
-            supported = {item["code"] for item in GOOGLE_LANGUAGES}
-            targets = [code for code in targets if code in supported] or ["zh-Hans"]
+        targets = [code for code in targets if code in supported] or ["zh-Hans"]
         self.target_languages = list(dict.fromkeys(targets))
         self.target_language = self.target_languages[0]
         return self
 
     def public(self):
-        values = self.model_dump(exclude={"youtube_key", "azure_key"})
-        values.update(youtube_key_set=bool(self.youtube_key), azure_key_set=bool(self.azure_key))
-        return values
+        return self.model_dump()
 
 
 class ConfigStore:
@@ -60,8 +49,9 @@ class ConfigStore:
         self.path = path
         if path.exists():
             values = json.loads(path.read_text("utf-8"))
-            values.setdefault("translation_provider", "azure")
-            values.setdefault("youtube_provider", "api" if values.get("youtube_key") else "web")
+            # Import old local settings without retaining obsolete modes or credentials.
+            for field in ("source_type", "youtube_provider", "youtube_key", "translation_provider", "azure_key", "azure_region"):
+                values.pop(field, None)
             self.config = Config.model_validate(values)
         else:
             self.config = Config()

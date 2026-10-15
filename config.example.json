@@ -1,11 +1,6 @@
 {
   "source": "https://www.youtube.com/watch?v=VIDEO_ID",
-  "source_type": "auto",
-  "youtube_key": "",
   "translation_enabled": false,
-  "translation_provider": "google_web",
-  "azure_key": "",
-  "azure_region": "eastasia",
   "target_language": "zh-Hans",
   "style": {
     "font_size": 24,
@@ -15,7 +10,6 @@
     "max_messages": 100,
     "custom_css": ""
   },
-  "youtube_provider": "web",
   "target_languages": [
     "zh-Hans",
     "en"

@@ -78,12 +78,6 @@ def test_paid_sticker_uses_image_metadata_and_bounded_dimensions():
     assert translation_text(msg) == ''
 
 
-def test_official_api_sticker_has_text_fallback_without_invented_image_url():
-    msg = map_item({'id': 'official', 'snippet': {'type': 'superStickerEvent',
-        'superStickerDetails': {'superStickerMetadata': {'stickerId': 'happy', 'altText': 'Happy sticker'}}}})['message']
-    assert msg['original'] == 'Happy sticker'
-    assert msg['content_parts'][0]['type'] == 'sticker'
-    assert msg['content_parts'][0]['url'] == ''
 
 
 async def test_pure_images_never_request_translation_and_remain_in_snapshots():

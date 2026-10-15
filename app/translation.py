@@ -26,38 +26,6 @@ def should_translate(text: str) -> bool:
     return any(unicodedata.category(char).startswith("L") for char in words)
 
 
-class AzureTranslator:
-    def __init__(self, client: httpx.AsyncClient, key: str, region: str):
-        self.client, self.key, self.region = client, key, region
-
-    async def translate(self, text: str, target: str) -> Result:
-        try:
-            response = await self.client.post(
-                "https://api.cognitive.microsofttranslator.com/translate",
-                params={"api-version": "3.0", "to": target},
-                headers={"Ocp-Apim-Subscription-Key": self.key, "Ocp-Apim-Subscription-Region": self.region},
-                json=[{"Text": text}], timeout=5,
-            )
-        except httpx.HTTPError:
-            raise TranslationError("unavailable") from None
-        if response.status_code in {401, 403}:
-            # Azure 403 covers authorization and quota failures. Do not expose raw responses.
-            raise TranslationError("credentials_or_quota")
-        if response.status_code == 429:
-            raise TranslationError("rate_limited")
-        if response.status_code >= 400:
-            raise TranslationError("unavailable")
-        try:
-            data = response.json()[0]
-            text = data["translations"][0]["text"]
-            language = data.get("detectedLanguage", {}).get("language", "")
-            if not isinstance(text, str) or not isinstance(language, str):
-                raise ValueError()
-            return Result(text, language)
-        except (ValueError, KeyError, IndexError, TypeError, AttributeError):
-            raise TranslationError("unavailable") from None
-
-
 GOOGLE_CODES = {"zh-Hans": "zh-CN", "zh-Hant": "zh-TW", "en": "en", "ja": "ja",
                 "ko": "ko", "es": "es", "fr": "fr", "de": "de"}
 
@@ -109,7 +77,7 @@ class GoogleWebTranslator:
             self.paused = True
             self.pause_message = ("Google 拒绝访问或要求验证码，翻译已暂停。请检查网络后恢复翻译。"
                                   if code == "blocked" else
-                                  "Google 网页翻译接口响应格式已变化，翻译已暂停；请等待适配更新或切换 Azure。")
+                                  "Google 网页翻译接口响应格式已变化，翻译已暂停；请等待适配更新。")
             self.on_state("paused", self.pause_message)
         elif code == "cooldown":
             self.on_state("rate_limited", "Google 正在限流等待中，请稍后测试；当前保留原文。")
@@ -165,7 +133,7 @@ class TranslationPool:
     """Bounded jobs, coalesced duplicate requests, and an in-memory LRU cache."""
 
     def __init__(self, provider, target: str, on_result: Callable, on_state: Callable,
-                 concurrency: int = 4, capacity: int = 200, timeout: float = 5,
+                 concurrency: int = 1, capacity: int = 200, timeout: float = 5,
                  is_current: Callable = lambda mid: True):
         self.provider, self.target = provider, target
         self.multi = isinstance(target, list)
@@ -272,11 +240,11 @@ class TranslationPool:
                 if isinstance(self.provider, GoogleWebTranslator):
                     self.provider.report_error(code)
                     continue
-                if self.paused and code != "credentials_or_quota":
+                if self.paused and code != "blocked":
                     continue
-                if code == "credentials_or_quota":
+                if code == "blocked":
                     self.paused = True
-                    self.on_state("paused", "翻译已暂停：请检查 Azure Key、区域和 F0 免费额度；修正配置或重新连接后恢复。")
+                    self.on_state("paused", "翻译已暂停：服务拒绝访问，请检查网络后恢复。")
                 elif code == "rate_limited":
                     self.cooldown_until = time.monotonic() + 2
                     self.on_state("rate_limited", "翻译服务限流，短暂退避；当前消息保留原文。")

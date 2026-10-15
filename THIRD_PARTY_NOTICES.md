@@ -9,14 +9,6 @@
 - 改动：普通消息传入独立译文、增加 `.translation` 和 `data-message-id`；使用 Vue 响应式字段更新；清空消息时取消旧滚动帧与消息定时器；移除普通消息重复计数控件，将徽章 tooltip 改为原生 title，并用本项目的配置、时间、头像及文案辅助模块适配。其余滚动逻辑和基础 DOM 保留。
 - 付费消息、会员卡片及 ticker 源码作为组件依赖保留，但首版后端不产生这些消息。没有复用 B 站连接、翻译服务或插件系统。
 
-## YouTube 官方 protobuf 示例
-
-- 来源：https://developers.google.com/youtube/v3/live/streaming-live-chat
-- 获取日期：2026-10-09。
-- 复用：`app/proto/stream_list.proto` 及生成的 Python 绑定。
-- 许可：页面注明代码示例为 Apache-2.0，完整许可见 `licenses/Apache-2.0.txt`。
-- 改动：补充示例遗漏的 `google/protobuf/duration.proto` import；生成客户端后的内部 import 改为包内相对 import。服务名、字段序号和枚举保持官方定义。
-
 ## curl_cffi
 
 - Google 网页翻译使用 curl_cffi 0.16.3 的异步 libcurl 会话，正常请求模式，未启用浏览器指纹模拟。
@@ -33,5 +25,4 @@ Python 运行依赖固定在 `requirements.txt`，前端依赖固定在 `fronten
 
 - 公开实现参考：[chat-downloader 的 YouTube 适配](https://github.com/xenova/chat-downloader/blob/94ed3fe9dd2af8f193ea5b25adc7509a8cbb0e63/chat_downloader/sites/youtube.py)，上游许可 MIT，查阅日期 2026-10-15。
 - 参考 `message.runs[].emoji` 的 `emojiId`、`shortcuts`、`image.thumbnails`、`isCustomEmoji`，以及 `liveChatPaidStickerRenderer.sticker` 的消息结构。新增代码独立实现，未引入该项目依赖或复制其源码。
-- YouTube 官方 API 的贴纸信息参考随项目保存的官方 protobuf `SuperStickerMetadata`；该字段没有图片 URL，因此官方模式仅显示可获得的贴纸描述，不猜测图片地址。
 - 表情和贴纸图片由上游消息提供的 YouTube/Google CDN 地址加载，权利归原作者或平台所有。离线演示的 `frontend/public/emotes/sakura.svg` 为本项目自行绘制的示例。

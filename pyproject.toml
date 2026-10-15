@@ -5,11 +5,11 @@ description = "Local YouTube live chat overlay with ordered multilingual transla
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115,<1", "uvicorn>=0.34,<1", "httpx>=0.28,<1", "curl-cffi==0.16.3",
-  "grpcio>=1.78,<2", "protobuf>=6.33.5,<7", "websockets>=14,<17"
+  "websockets>=14,<17"
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8,<10", "pytest-asyncio>=0.25,<2", "grpcio-tools>=1.78,<1.79"]
+dev = ["pytest>=8,<10", "pytest-asyncio>=0.25,<2"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -22,6 +22,3 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["app*"]
-
-[tool.setuptools.package-data]
-"app.proto" = ["*.proto"]

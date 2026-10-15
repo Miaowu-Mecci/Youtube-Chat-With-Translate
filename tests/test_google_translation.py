@@ -28,17 +28,16 @@ def payload(text='你好', language='en'):
 
 def test_new_config_and_legacy_migration(tmp_path):
     path = tmp_path / 'config.json'
-    assert ConfigStore(path).config.translation_provider == 'google_web'
-    path.write_text(json.dumps({'azure_key': 'PRIVATE', 'azure_region': 'eastasia',
+    assert 'translation_provider' not in ConfigStore(path).config.public()
+    path.write_text(json.dumps({'azure_key': 'PRIVATE', 'youtube_key': 'OLD', 'azure_region': 'eastasia',
+                                'translation_provider': 'azure', 'youtube_provider': 'api',
                                 'target_language': 'it', 'translation_enabled': True}), encoding='utf-8')
     store = ConfigStore(path)
-    assert store.config.translation_provider == 'azure'
-    assert store.config.target_language == 'it'
-    assert store.config.azure_key == 'PRIVATE'
+    assert store.config.target_languages == ['zh-Hans']
+    assert store.config.translation_enabled
     assert 'PRIVATE' not in str(store.config.public())
     store.save(store.config)
-    assert ConfigStore(path).config.translation_provider == 'azure'
-    assert Config(translation_provider='google_web', target_language='it').target_language == 'zh-Hans'
+    assert not any(key in json.loads(path.read_text()) for key in ['youtube_key', 'azure_key', 'translation_provider'])
 
 
 @pytest.mark.parametrize('target,google', [('zh-Hans', 'zh-CN'), ('zh-Hant', 'zh-TW'), ('ja', 'ja')])
@@ -151,11 +150,11 @@ def test_api_google_no_keys_languages_test_and_shared_cooldown(tmp_path, monkeyp
         return httpx.Response(429)
     with TestClient(app) as client:
         monkeypatch.setattr(app.state.hub.google.client, 'get', respond)
-        assert client.get('/api/config').json()['translation_provider'] == 'google_web'
+        assert 'translation_provider' not in client.get('/api/config').json()
         assert len(client.get('/api/languages').json()['languages']) == 8
-        assert client.get('/api/languages?provider=invalid').status_code == 422
+        assert client.get('/api/languages?provider=azure').json() == client.get('/api/languages').json()
         assert client.put('/api/config', json={'translation_provider': 'invalid'}).status_code == 422
-        assert client.put('/api/config', json={'translation_provider': 'google_web', 'target_language': 'it'}).json()['target_language'] == 'zh-Hans'
+        assert client.put('/api/config', json={'target_language': 'it'}).json()['target_language'] == 'zh-Hans'
         result = client.post('/api/translation/test')
         assert result.status_code == 503 and result.json()['code'] == 'rate_limited'
         assert client.post('/api/translation/test').json()['code'] == 'cooldown'
@@ -163,8 +162,7 @@ def test_api_google_no_keys_languages_test_and_shared_cooldown(tmp_path, monkeyp
         client.post('/api/translation/resume')
         assert client.post('/api/translation/test').json()['code'] == 'cooldown'
         assert len(calls) == 1
-        client.put('/api/config', json={'translation_provider': 'azure'})
-        assert client.post('/api/translation/test').json()['code'] == 'missing_credentials'
+        assert client.put('/api/config', json={'translation_provider': 'azure'}).status_code == 422
 
 
 def test_api_success_and_english_test_uses_foreign_sample(tmp_path, monkeypatch):
@@ -206,22 +204,23 @@ async def test_libcurl_network_error_keeps_worker_alive_and_hides_request_detail
             await pool.close()
 
 
-async def test_diagnostic_and_live_chat_share_guard_and_provider_switch_cancels_old_jobs():
+async def test_diagnostic_and_live_chat_share_guard_and_language_change_cancels_old_jobs():
     started, release = asyncio.Event(), asyncio.Event()
     async def respond(request):
-        if request.url.host == 'translate.googleapis.com':
+        if request.url.params['tl'] == 'zh-CN':
             started.set()
             await release.wait()
             return httpx.Response(200, json=payload('旧译文'))
-        return httpx.Response(200, json=[{'detectedLanguage': {'language': 'en'}, 'translations': [{'text': '新译文'}]}])
+        return httpx.Response(200, json=payload('新译文'))
     class Source:
         async def resolve(self, *args): return 'CHAT'
         async def stream(self, *args):
             yield Batch([item()], 'token')
             await asyncio.Event().wait()
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
-        config = Config(source='CHAT', youtube_key='YT', translation_enabled=True)
+        config = Config(source='CHAT', translation_enabled=True)
         hub = ChatHub(config, Source(), client)
+        hub.google.interval = 0
         await hub.connect()
         try:
             await asyncio.wait_for(started.wait(), 1)
@@ -229,7 +228,7 @@ async def test_diagnostic_and_live_chat_share_guard_and_provider_switch_cancels_
             with pytest.raises(TranslationError) as error:
                 await hub.test_translation()
             assert error.value.code == 'busy'
-            await hub.configure(config.model_copy(update={'translation_provider': 'azure', 'azure_key': 'KEY', 'azure_region': 'eastasia'}))
+            await hub.configure(config.model_copy(update={'target_language': 'ja', 'target_languages': ['ja']}))
             release.set()
             await asyncio.wait_for(hub.pool.queue.join(), 1)
             assert hub.messages['one']['translation'] == '新译文'
@@ -274,7 +273,7 @@ async def test_resume_restores_unfinished_messages_without_duplicate_or_stale_up
                 yield Batch([value], 'token')
             await asyncio.Event().wait()
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
-        hub = ChatHub(Config(source='CHAT', youtube_key='YT', translation_enabled=True, target_language='ja'), Source(), client)
+        hub = ChatHub(Config(source='CHAT', translation_enabled=True, target_language='ja'), Source(), client)
         hub.google.interval = 0
         await hub.connect()
         try:

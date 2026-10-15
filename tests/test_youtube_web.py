@@ -8,7 +8,7 @@ import pytest
 from app.config import Config, ConfigStore
 from app.hub import ChatHub
 from app.youtube import SourceError, map_item
-from app.youtube_web import ChatSource, WebChatSource, continuation, extract_json, map_action
+from app.youtube_web import WebChatSource, continuation, extract_json, map_action
 
 
 def action(mid='one', body='你好', timestamp='1770000000000000'):
@@ -62,15 +62,15 @@ async def test_web_resolve_poll_resume_and_end_without_user_key(monkeypatch):
             'actions': [action('two')], 'continuations': [] if token == 'next' else [
                 {'timedContinuationData': {'continuation': 'next', 'timeoutMs': 2000}}]}}})
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
-        source = ChatSource(client)
-        video = await source.resolve('https://youtu.be/abcdefghijk', 'auto', '')
-        stream = source.stream(video, '', '')
+        source = WebChatSource(client)
+        video = await source.resolve('https://youtu.be/abcdefghijk')
+        stream = source.stream(video)
         initial = await anext(stream)
         assert initial.token == 'initial' and initial.items[0]['id'] == 'one'
         batch = await anext(stream)
         assert batch.token == 'next' and not batch.offline
         await stream.aclose()
-        resumed = source.stream(video, '', batch.token)
+        resumed = source.stream(video, batch.token)
         final = await anext(resumed)
         assert final.offline
         await resumed.aclose()
@@ -81,7 +81,7 @@ async def test_web_resolve_poll_resume_and_end_without_user_key(monkeypatch):
 async def test_web_failures_are_actionable(status, code, retry):
     async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(status, text='private upstream data'))) as client:
         with pytest.raises(SourceError) as exc:
-            await WebChatSource(client).resolve('abcdefghijk', 'auto')
+            await WebChatSource(client).resolve('abcdefghijk')
         assert exc.value.code == code and exc.value.retry == retry
         assert 'private upstream data' not in exc.value.message
 
@@ -90,28 +90,26 @@ async def test_web_failures_are_actionable(status, code, retry):
 async def test_unavailable_chat_is_not_a_fake_connection(html):
     async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html))) as client:
         with pytest.raises(SourceError):
-            await WebChatSource(client).resolve('abcdefghijk', 'auto')
+            await WebChatSource(client).resolve('abcdefghijk')
 
 
 async def test_chat_id_rejected_before_request():
-    with pytest.raises(SourceError, match='直播视频链接'):
-        await WebChatSource(None).resolve('chat-id', 'chat')
+    with pytest.raises(SourceError, match='视频 ID'):
+        await WebChatSource(None).resolve('chat-id')
 
 
-async def test_web_source_keeps_key_private_and_filters_historical_messages():
+async def test_web_source_filters_historical_messages():
     cutoff = datetime.now(timezone.utc)
     delivered = asyncio.Event()
     class Source:
-        async def resolve(self, source, kind, key):
-            assert key == ''
+        async def resolve(self, source):
             return 'abcdefghijk'
-        async def stream(self, source, key, token):
+        async def stream(self, source, token):
             from app.youtube import Batch
-            assert key == ''
             yield Batch([map_action(action('old')), map_action(action('new', timestamp=str(int(cutoff.timestamp() * 1_000_000) + 1)))], 'token')
             delivered.set()
             await asyncio.Event().wait()
-    hub = ChatHub(Config(source='abcdefghijk', youtube_provider='web', youtube_key='DO_NOT_SEND'), Source(), None)
+    hub = ChatHub(Config(source='abcdefghijk'), Source(), None)
     await hub.connect(started_at=cutoff)
     try:
         await asyncio.wait_for(delivered.wait(), 1)
@@ -121,12 +119,12 @@ async def test_web_source_keeps_key_private_and_filters_historical_messages():
         await hub.stop()
 
 
-def test_legacy_config_migration_preserves_official_mode(tmp_path):
+def test_legacy_config_migration_discards_removed_credentials(tmp_path):
     path = tmp_path / 'config.json'
     path.write_text(json.dumps({'youtube_key': 'OLD', 'target_language': 'en'}))
     config = ConfigStore(path).config
-    assert config.youtube_provider == 'api' and config.target_languages == ['en']
-    assert Config().youtube_provider == 'web'
+    assert 'youtube_provider' not in config.public() and config.target_languages == ['en']
+    assert 'youtube_key' not in Config().public()
 
 
 def test_continuation_delay_bounds_and_safe_json_extraction():
@@ -144,7 +142,7 @@ def test_continuation_delay_bounds_and_safe_json_extraction():
 async def test_web_bootstrap_accepts_script_assignment_variants(assignment):
     html = page().replace('var ytInitialData = ', assignment)
     async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html))) as client:
-        assert await WebChatSource(client).resolve('Sv2vZ8uZKVI', 'video') == 'Sv2vZ8uZKVI'
+        assert await WebChatSource(client).resolve('Sv2vZ8uZKVI') == 'Sv2vZ8uZKVI'
 
 
 def test_page_state_accepts_json_parse_without_executing_script():
@@ -177,7 +175,7 @@ async def test_missing_chat_bootstrap_falls_back_to_watch_page_and_polls(monkeyp
     monkeypatch.setattr('app.youtube_web.asyncio.sleep', immediate)
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
         source = WebChatSource(client)
-        video = await source.resolve('https://www.youtube.com/watch?v=Sv2vZ8uZKVI', 'auto')
+        video = await source.resolve('https://www.youtube.com/watch?v=Sv2vZ8uZKVI')
         stream = source.stream(video)
         try:
             await anext(stream)
@@ -199,7 +197,7 @@ async def test_watch_fallback_identifies_video_access_state(status, expected):
         return httpx.Response(200, text='var ytInitialPlayerResponse = ' + json.dumps({'playabilityStatus': {'status': status}}))
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
         with pytest.raises(SourceError) as error:
-            await WebChatSource(client).resolve('Sv2vZ8uZKVI', 'video')
+            await WebChatSource(client).resolve('Sv2vZ8uZKVI')
         assert error.value.code == expected
         assert calls == ['/live_chat']
 
@@ -216,7 +214,7 @@ async def test_challenge_pages_report_specific_blocker_without_retry(html, code)
         return httpx.Response(200, text=html)
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
         with pytest.raises(SourceError) as error:
-            await WebChatSource(client).resolve('Sv2vZ8uZKVI', 'video')
+            await WebChatSource(client).resolve('Sv2vZ8uZKVI')
         assert error.value.code == code and not error.value.retry
     assert len(calls) == 1
 
@@ -228,7 +226,7 @@ async def test_challenge_pages_report_specific_blocker_without_retry(html, code)
 async def test_access_redirect_is_not_followed(destination, code):
     async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(303, headers={'location': destination}))) as client:
         with pytest.raises(SourceError) as error:
-            await WebChatSource(client).resolve('Sv2vZ8uZKVI', 'video')
+            await WebChatSource(client).resolve('Sv2vZ8uZKVI')
         assert error.value.code == code
 
 
@@ -237,14 +235,14 @@ async def test_proxy_rejection_is_not_reported_as_page_parser_failure():
         raise httpx.ProxyError('CONNECT tunnel rejected')
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
         with pytest.raises(SourceError) as error:
-            await WebChatSource(client).resolve('Sv2vZ8uZKVI', 'video')
+            await WebChatSource(client).resolve('Sv2vZ8uZKVI')
         assert error.value.code == 'proxy'
 
 
 async def test_chat_text_cannot_be_mistaken_for_a_verification_page():
     html = page().replace('你好', "Sign in to confirm you're not a bot")
     async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html))) as client:
-        assert await WebChatSource(client).resolve('Sv2vZ8uZKVI', 'video') == 'Sv2vZ8uZKVI'
+        assert await WebChatSource(client).resolve('Sv2vZ8uZKVI') == 'Sv2vZ8uZKVI'
 
 
 async def test_parser_diagnostics_include_only_safe_page_metadata():
@@ -252,7 +250,7 @@ async def test_parser_diagnostics_include_only_safe_page_metadata():
         return httpx.Response(200, text='<html>TOP_SECRET private-body</html>', headers={'content-type': 'text/html', 'set-cookie': 'SECRET=hidden'})
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
         with pytest.raises(SourceError) as error:
-            await WebChatSource(client).resolve('Sv2vZ8uZKVI', 'video')
+            await WebChatSource(client).resolve('Sv2vZ8uZKVI')
         assert error.value.code == 'web_protocol'
         assert '聊天页 HTTP 200/HTML' in error.value.message
         assert '观看页 HTTP 200/HTML' in error.value.message

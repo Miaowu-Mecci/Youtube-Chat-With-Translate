@@ -5,24 +5,18 @@ from fastapi.testclient import TestClient
 from app.server import create_app
 
 
-def test_config_persistence_secret_redaction_and_validation(tmp_path):
+def test_config_persistence_and_removed_credentials_rejected(tmp_path):
     path = tmp_path / 'config.json'
     with TestClient(create_app(path)) as client:
-        response = client.put('/api/config', json={'youtube_key': 'YT_SECRET', 'azure_key': 'AZURE_SECRET', 'source': 'CHAT'})
+        response = client.put('/api/config', json={'source': 'Sv2vZ8uZKVI', 'target_languages': ['ja', 'en']})
         assert response.status_code == 200
-        assert response.json()['youtube_key_set']
-        assert 'SECRET' not in response.text
-        client.put('/api/config', json={'target_language': 'ja'})
-        assert json.loads(path.read_text())['youtube_key'] == 'YT_SECRET'
-        response = client.put('/api/config', json={'youtube_key': 'SECRET' * 100})
-        assert response.status_code == 422 and 'SECRET' not in response.text
-        response = client.put('/api/config', json={'style': {'font_size': 999}})
-        assert response.status_code == 422
-        client.put('/api/config', json={'youtube_key': ''})
-        assert not client.get('/api/config').json()['youtube_key_set']
+        assert 'youtube_key' not in response.json() and 'azure_key' not in response.json()
+        response = client.put('/api/config', json={'youtube_key': 'PRIVATE_SECRET'})
+        assert response.status_code == 422 and 'PRIVATE_SECRET' not in response.text
+        assert 'youtube_key' not in json.loads(path.read_text())
+        assert client.put('/api/config', json={'style': {'font_size': 999}}).status_code == 422
     with TestClient(create_app(path)) as client:
-        assert client.get('/api/config').json()['target_language'] == 'ja'
-        assert client.get('/api/config').json()['azure_key_set']
+        assert client.get('/api/config').json()['target_languages'] == ['ja', 'en']
 
 
 def test_foreign_origins_and_hosts_rejected(tmp_path):
@@ -60,3 +54,18 @@ def test_connect_accepts_click_timestamp_and_rejects_unzoned_timestamp(tmp_path)
         assert client.post('/api/connect', json={'started_at': '2026-10-09T00:00:00'}).status_code == 422
         assert client.post('/api/connect', json={'started_at': 'invalid'}).status_code == 422
         assert client.post('/api/connect').status_code == 200
+
+
+def test_legacy_local_config_keeps_source_style_and_order_without_old_credentials(tmp_path):
+    path = tmp_path / 'config.json'
+    path.write_text(json.dumps({'source': 'Sv2vZ8uZKVI', 'source_type': 'video', 'youtube_provider': 'api',
+        'youtube_key': 'OLD_PRIVATE', 'translation_provider': 'azure', 'azure_key': 'OLD_PRIVATE',
+        'azure_region': 'eastasia', 'target_languages': ['ja', 'en'], 'style': {'font_size': 38}}))
+    with TestClient(create_app(path)) as client:
+        config = client.get('/api/config').json()
+        assert config['source'] == 'Sv2vZ8uZKVI'
+        assert config['style']['font_size'] == 38 and config['target_languages'] == ['ja', 'en']
+        assert 'OLD_PRIVATE' not in json.dumps(config)
+        assert client.put('/api/config', json=config).status_code == 200
+    saved = json.loads(path.read_text())
+    assert not any(field in saved for field in ['youtube_key', 'azure_key', 'source_type', 'translation_provider'])

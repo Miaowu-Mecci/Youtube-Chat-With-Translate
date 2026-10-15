@@ -20,7 +20,7 @@ async def test_multiple_clients_share_stream_and_resume_token(monkeypatch):
     class Source:
         calls = []
         async def resolve(self, *args): return 'CHAT'
-        async def stream(self, chat, key, token):
+        async def stream(self, chat, token):
             self.calls.append(token)
             yield Batch([item()], 'next-token')
             if len(self.calls) == 1:
@@ -28,7 +28,7 @@ async def test_multiple_clients_share_stream_and_resume_token(monkeypatch):
             started.set()
             await asyncio.Event().wait()
     source = Source()
-    hub = ChatHub(Config(source='CHAT', youtube_key='SECRET'), source, None)
+    hub = ChatHub(Config(source='CHAT'), source, None)
     q1, q2 = hub.subscribe(), hub.subscribe()
     await asyncio.gather(hub.connect(), hub.connect())
     await asyncio.wait_for(started.wait(), 3)
@@ -64,20 +64,22 @@ async def test_language_change_cancels_old_jobs_and_keeps_one_stream():
     release = asyncio.Event()
     calls = []
     async def response(request):
-        target = request.url.params['to']
+        target = request.url.params['tl']
+        target = {'zh-CN': 'zh-Hans'}.get(target, target)
         calls.append(target)
         if target == 'ja':
             request_started.set()
             await release.wait()
-        return httpx.Response(200, json=[{'detectedLanguage': {'language': 'en'}, 'translations': [{'text': target}]}])
+        return httpx.Response(200, json=[[[target]], None, 'en'])
     class Source:
         async def resolve(self, *args): return 'CHAT'
         async def stream(self, *args):
             yield Batch([item()], 'token')
             await asyncio.Event().wait()
     async with httpx.AsyncClient(transport=httpx.MockTransport(response)) as client:
-        config = Config(source='CHAT', youtube_key='SECRET', translation_enabled=True, translation_provider='azure', azure_key='SECRET', azure_region='eastasia', target_language='ja')
+        config = Config(source='CHAT', translation_enabled=True, target_language='ja')
         hub = ChatHub(config, Source(), client)
+        hub.google.interval = 0
         await hub.connect()
         await asyncio.wait_for(request_started.wait(), 1)
         source_task = hub.task
@@ -99,19 +101,19 @@ async def test_same_language_and_text_are_not_duplicated():
     assert hub.messages['one']['translation'] == ''
 
 
-async def test_terminal_quota_error_stops_retrying():
+async def test_terminal_rate_limit_error_stops_retrying():
     class Source:
         calls = 0
         async def resolve(self, *args): return 'CHAT'
         async def stream(self, *args):
             self.calls += 1
-            raise SourceError('quota_exhausted', '额度用完')
+            raise SourceError('rate_limited', '额度用完')
             yield
     source = Source()
-    hub = ChatHub(Config(source='CHAT', youtube_key='SECRET'), source, None)
+    hub = ChatHub(Config(source='CHAT'), source, None)
     await hub.connect()
     await asyncio.wait_for(hub.task, 1)
-    assert source.calls == 1 and hub.status['code'] == 'quota_exhausted'
+    assert source.calls == 1 and hub.status['code'] == 'rate_limited'
     await hub.disconnect()
 
 
@@ -139,7 +141,7 @@ async def test_source_change_clears_messages_and_stops_old_session():
         async def stream(self, *args):
             yield Batch([item()], 'token')
             await asyncio.Event().wait()
-    config = Config(source='CHAT', youtube_key='SECRET')
+    config = Config(source='CHAT')
     hub = ChatHub(config, Source(), None)
     await hub.connect()
     await asyncio.sleep(.01)
@@ -157,7 +159,7 @@ async def test_style_save_does_not_restart_connection():
             self.calls += 1
             yield Batch([item()], 'token')
             await asyncio.Event().wait()
-    config = Config(source='CHAT', youtube_key='SECRET')
+    config = Config(source='CHAT')
     source = Source()
     hub = ChatHub(config, source, None)
     await hub.connect()
@@ -210,7 +212,7 @@ async def test_connection_filters_history_before_enqueue_and_preserves_click_dur
         calls.append(request.url.params['q'])
         return httpx.Response(200, json=[[['こんにちは', 'hello']], None, 'en'])
     async with httpx.AsyncClient(transport=httpx.MockTransport(translate)) as client:
-        hub = ChatHub(Config(source='CHAT', youtube_key='YT', translation_enabled=True, target_language='ja'), Source(), client)
+        hub = ChatHub(Config(source='CHAT', translation_enabled=True, target_language='ja'), Source(), client)
         connecting = asyncio.create_task(hub.connect(started_at=cutoff))
         await asyncio.wait_for(resolving.wait(), 1)
         assert hub.chat_started_at == cutoff
@@ -234,7 +236,7 @@ async def test_reconnect_keeps_cutoff_and_manual_new_connection_resets_it():
     class Source:
         def __init__(self): self.calls = []
         async def resolve(self, *args): return 'CHAT'
-        async def stream(self, chat, key, token):
+        async def stream(self, chat, token):
             self.calls.append(token)
             yield Batch([timed_item('old', (cutoff - timedelta(seconds=1)).isoformat()),
                          timed_item('between', (cutoff + timedelta(seconds=1)).isoformat())], 'next')
@@ -244,7 +246,7 @@ async def test_reconnect_keeps_cutoff_and_manual_new_connection_resets_it():
             delivered.set()
             await asyncio.Event().wait()
     source = Source()
-    hub = ChatHub(Config(source='CHAT', youtube_key='YT'), source, None)
+    hub = ChatHub(Config(source='CHAT'), source, None)
     await hub.connect(started_at=cutoff)
     try:
         await asyncio.wait_for(delivered.wait(), 3)
