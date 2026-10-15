@@ -133,3 +133,128 @@ def test_continuation_delay_bounds_and_safe_json_extraction():
     assert continuation({'continuations': [{'timedContinuationData': {'continuation': 'x', 'timeoutMs': 0}}]}) == ('x', 1)
     assert continuation({'continuations': [{'timedContinuationData': {'continuation': 'x', 'timeoutMs': 90000}}]}) == ('x', 30)
     assert extract_json('var ytInitialData = {"x":"};literal"}; extra()', r'ytInitialData\s*=') == {'x': '};literal'}
+
+
+@pytest.mark.parametrize('assignment', [
+    "window['ytInitialData'] = ",
+    "window [ 'ytInitialData' ] = ",
+    'window [ "ytInitialData" ] = ',
+    'let ytInitialData = ',
+])
+async def test_web_bootstrap_accepts_script_assignment_variants(assignment):
+    html = page().replace('var ytInitialData = ', assignment)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html))) as client:
+        assert await WebChatSource(client).resolve('Sv2vZ8uZKVI', 'video') == 'Sv2vZ8uZKVI'
+
+
+def test_page_state_accepts_json_parse_without_executing_script():
+    from app.youtube_web import page_state
+    data = {'contents': {'liveChatRenderer': {'continuations': []}}}
+    html = 'window["ytInitialData"] = JSON.parse(' + json.dumps(json.dumps(data)) + ');'
+    assert page_state(html)[0] == data
+    html = "window['ytInitialData'] = JSON.parse('" + json.dumps(data) + "');"
+    assert page_state(html)[0] == data
+    assert page_state("ytInitialData = JSON.parse(__import__('os').system('false'));")[0] is None
+
+
+async def test_missing_chat_bootstrap_falls_back_to_watch_page_and_polls(monkeypatch):
+    from app.youtube_web import page_state
+    data, cfg, _ = page_state(page())
+    renderer = data['contents']['liveChatRenderer']
+    watch_data = {'contents': {'twoColumnWatchNextResults': {'conversationBar': {'liveChatRenderer': renderer}}}}
+    html = '<script>ytcfg.set(' + json.dumps(cfg) + '); window[\'ytInitialData\'] = ' + json.dumps(watch_data) + ';</script>'
+    calls = []
+    def respond(request):
+        calls.append(request.url.path)
+        if request.url.path == '/live_chat':
+            return httpx.Response(200, text='<html><body>chat frame without bootstrap</body></html>')
+        if request.url.path == '/watch':
+            return httpx.Response(200, text=html)
+        body = json.loads(request.content)
+        assert body['continuation'] == 'initial'
+        return httpx.Response(200, json={'continuationContents': {'liveChatContinuation': {'actions': [action('new')], 'continuations': []}}})
+    async def immediate(_): pass
+    monkeypatch.setattr('app.youtube_web.asyncio.sleep', immediate)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        source = WebChatSource(client)
+        video = await source.resolve('https://www.youtube.com/watch?v=Sv2vZ8uZKVI', 'auto')
+        stream = source.stream(video)
+        try:
+            await anext(stream)
+            final = await anext(stream)
+            assert final.items[0]['id'] == 'new' and final.offline
+        finally:
+            await stream.aclose()
+    assert calls == ['/live_chat', '/watch', '/youtubei/v1/live_chat/get_live_chat']
+
+
+@pytest.mark.parametrize('status,expected', [
+    ('LOGIN_REQUIRED', 'login_required'), ('LIVE_STREAM_OFFLINE', 'not_live'),
+    ('ERROR', 'video_unavailable'), ('UNPLAYABLE', 'video_unavailable'),
+])
+async def test_watch_fallback_identifies_video_access_state(status, expected):
+    calls = []
+    def respond(request):
+        calls.append(request.url.path)
+        return httpx.Response(200, text='var ytInitialPlayerResponse = ' + json.dumps({'playabilityStatus': {'status': status}}))
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        with pytest.raises(SourceError) as error:
+            await WebChatSource(client).resolve('Sv2vZ8uZKVI', 'video')
+        assert error.value.code == expected
+        assert calls == ['/live_chat']
+
+
+@pytest.mark.parametrize('html,code', [
+    ('<html><div class="g-recaptcha"></div></html>', 'verification_required'),
+    ('<html><p>Sign in to confirm you’re not a bot</p></html>', 'verification_required'),
+    ('<form action="https://consent.youtube.com/save"></form>', 'consent_required'),
+])
+async def test_challenge_pages_report_specific_blocker_without_retry(html, code):
+    calls = []
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(200, text=html)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        with pytest.raises(SourceError) as error:
+            await WebChatSource(client).resolve('Sv2vZ8uZKVI', 'video')
+        assert error.value.code == code and not error.value.retry
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize('destination,code', [
+    ('https://consent.youtube.com/m', 'consent_required'),
+    ('https://accounts.google.com/ServiceLogin', 'login_required'),
+])
+async def test_access_redirect_is_not_followed(destination, code):
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(303, headers={'location': destination}))) as client:
+        with pytest.raises(SourceError) as error:
+            await WebChatSource(client).resolve('Sv2vZ8uZKVI', 'video')
+        assert error.value.code == code
+
+
+async def test_proxy_rejection_is_not_reported_as_page_parser_failure():
+    def respond(request):
+        raise httpx.ProxyError('CONNECT tunnel rejected')
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        with pytest.raises(SourceError) as error:
+            await WebChatSource(client).resolve('Sv2vZ8uZKVI', 'video')
+        assert error.value.code == 'proxy'
+
+
+async def test_chat_text_cannot_be_mistaken_for_a_verification_page():
+    html = page().replace('你好', "Sign in to confirm you're not a bot")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=html))) as client:
+        assert await WebChatSource(client).resolve('Sv2vZ8uZKVI', 'video') == 'Sv2vZ8uZKVI'
+
+
+async def test_parser_diagnostics_include_only_safe_page_metadata():
+    def respond(request):
+        return httpx.Response(200, text='<html>TOP_SECRET private-body</html>', headers={'content-type': 'text/html', 'set-cookie': 'SECRET=hidden'})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        with pytest.raises(SourceError) as error:
+            await WebChatSource(client).resolve('Sv2vZ8uZKVI', 'video')
+        assert error.value.code == 'web_protocol'
+        assert '聊天页 HTTP 200/HTML' in error.value.message
+        assert '观看页 HTTP 200/HTML' in error.value.message
+        assert '初始标记无' in error.value.message
+        assert 'TOP_SECRET' not in error.value.message and 'SECRET' not in error.value.message

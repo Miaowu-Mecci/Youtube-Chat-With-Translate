@@ -1,5 +1,6 @@
 """Public YouTube live-chat continuation protocol; no account or user API key."""
 import asyncio
+import ast
 import json
 import re
 from datetime import datetime, timezone
@@ -9,23 +10,101 @@ import httpx
 from .youtube import Batch, SourceError, YouTubeSource, parse_source
 
 
-def extract_json(html: str, pattern: str):
+def json_objects(html: str, pattern: str):
     decoder = json.JSONDecoder()
     for match in re.finditer(pattern, html):
+        tail = html[match.end():].lstrip()
         try:
-            return decoder.raw_decode(html[match.end():].lstrip())[0]
-        except ValueError:
+            if tail.startswith("JSON.parse("):
+                # Parse a literal string only; never execute JavaScript from a page.
+                literal = re.match(r"(?:'(?:(?:\\.)|[^'\\])*'|\"(?:(?:\\.)|[^\"\\])*\")", tail[len("JSON.parse("):].lstrip())
+                if not literal:
+                    continue
+                value = json.loads(ast.literal_eval(literal.group()))
+            else:
+                value = decoder.raw_decode(tail)[0]
+            if isinstance(value, dict):
+                yield value
+        except (ValueError, SyntaxError, TypeError):
             continue
-    return None
+
+
+def extract_json(html: str, pattern: str):
+    return next(json_objects(html, pattern), None)
+
+
+def page_state(html):
+    name = r"(?:\bytInitialData|window\s*\[\s*[\"']ytInitialData[\"']\s*\])\s*="
+    candidates = list(json_objects(html, name))
+    # Ignore unrelated early assignments, and accept JSON bootstrap responses too.
+    data = next((value for value in candidates if continuation(find_chat_renderer(value))[0]),
+                next((value for value in candidates if "contents" in value), None))
+    if data is None:
+        try:
+            value = json.loads(html)
+            if isinstance(value, dict) and "contents" in value:
+                data = value
+        except ValueError:
+            pass
+    cfg = {}
+    for value in json_objects(html, r"ytcfg\.set\s*\("):
+        cfg.update(value)
+    player = extract_json(html, r"(?:\bytInitialPlayerResponse|window\s*\[\s*[\"']ytInitialPlayerResponse[\"']\s*\])\s*=") or {}
+    return data, cfg, player
+
+
+def page_diagnostic(stage, response, data, renderer):
+    # Metadata only: never expose URLs, cookies, page contents, client keys or chat text.
+    mime = response.headers.get("content-type", "").split(";", 1)[0].lower()
+    kind = {"text/html": "HTML", "application/json": "JSON", "text/plain": "纯文本"}.get(mime, "未知类型")
+    marker = "有" if "ytInitialData" in response.text else "无"
+    parsed = "成功" if data is not None else "失败"
+    token = "有" if continuation(renderer)[0] else "无"
+    return f"{stage} HTTP {response.status_code}/{kind}，初始标记{marker}，解析{parsed}，聊天令牌{token}"
+
+
+def find_chat_renderer(data):
+    pending = [data]
+    while pending:
+        node = pending.pop()
+        if isinstance(node, dict):
+            renderer = node.get("liveChatRenderer")
+            if isinstance(renderer, dict):
+                return renderer
+            pending.extend(node.values())
+        elif isinstance(node, list):
+            pending.extend(node)
+    return {}
+
+
+def check_page_access(html, player):
+    lower = html.lower()
+    if any(marker in lower for marker in ("g-recaptcha", "/sorry/index", "unusual traffic", "confirm you're not a bot", "confirm you’re not a bot")):
+        raise SourceError("verification_required", "YouTube 要求验证码或机器人验证，免费网页模式无法自动完成验证。请在浏览器检查此直播，或尝试官方 API。")
+    if re.search(r'<form[^>]+action=[\"\'][^\"\']*consent\.(?:youtube|google)\.com', lower):
+        raise SourceError("consent_required", "YouTube 返回隐私同意页面，未提供聊天数据；请检查所在网络的访问限制，或尝试官方 API。")
+    status = player.get("playabilityStatus", {})
+    code = status.get("status")
+    if code == "LOGIN_REQUIRED":
+        raise SourceError("login_required", "此视频要求登录或年龄验证，匿名免费网页模式无法读取聊天；请在浏览器确认视频访问限制。")
+    if code == "LIVE_STREAM_OFFLINE":
+        raise SourceError("not_live", "直播尚未开始或当前未在直播，暂时无法连接实时聊天。")
+    if code in {"ERROR", "UNPLAYABLE"}:
+        raise SourceError("video_unavailable", "此视频不可用或受地区/访问权限限制，请在浏览器确认直播可公开观看。")
 
 
 def continuation(data):
     if not isinstance(data, dict):
         return "", 2
-    for entry in data.get("continuations", []):
+    entries = data.get("continuations", [])
+    if not isinstance(entries, list):
+        return "", 2
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
         for name in ("invalidationContinuationData", "timedContinuationData", "reloadContinuationData"):
             value = entry.get(name, {})
-            if value.get("continuation"):
+            if isinstance(value, dict) and isinstance(value.get("continuation"), str) and value["continuation"]:
                 try:
                     delay = float(value.get("timeoutMs", 2000)) / 1000
                 except (ValueError, TypeError):
@@ -79,11 +158,14 @@ class WebChatSource:
         self.initial = None
         self.api_key = ""
         self.client_name = "1"
+        self.video = ""
 
     async def request(self, method, path, **kwargs):
         try:
-            headers = {"User-Agent": "Mozilla/5.0", "Accept-Language": "en-US,en;q=0.9",
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36", "Accept-Language": "en-US,en;q=0.9",
                        "Origin": "https://www.youtube.com"}
+            if self.video:
+                headers["Referer"] = "https://www.youtube.com/watch?v=" + self.video
             if self.context:
                 client = self.context["client"]
                 headers.update({"X-Youtube-Client-Name": self.client_name,
@@ -92,10 +174,18 @@ class WebChatSource:
                     headers["X-Goog-Visitor-Id"] = client["visitorData"]
             response = await self.client.request(method, "https://www.youtube.com" + path,
                 headers=headers, timeout=15, **kwargs)
+        except httpx.ProxyError:
+            raise SourceError("proxy", "代理未能建立到 YouTube 的连接，请检查代理设置和出口网络规则。", True) from None
         except httpx.HTTPError:
             raise SourceError("network", "无法访问 YouTube 网页，请检查网络或代理。", True) from None
         if response.status_code == 429:
             raise SourceError("rate_limited", "YouTube 网页暂时限流，请稍后手动重连。")
+        if 300 <= response.status_code < 400:
+            host = httpx.URL(response.headers.get("location", "")).host
+            if host in {"consent.youtube.com", "consent.google.com"}:
+                raise SourceError("consent_required", "YouTube 要求隐私同意，未提供聊天数据；请检查网络访问限制，或尝试官方 API。")
+            if host == "accounts.google.com":
+                raise SourceError("login_required", "此视频要求登录，匿名免费网页模式无法读取聊天。")
         if response.status_code in {401, 403} or 300 <= response.status_code < 400:
             raise SourceError("web_blocked", "YouTube 网页要求登录、同意隐私政策或拒绝访问；请检查网络，或切换官方 API。")
         if response.status_code >= 400:
@@ -106,19 +196,31 @@ class WebChatSource:
         parsed, video = parse_source(source, "video" if kind == "auto" else kind)
         if parsed != "video":
             raise SourceError("invalid_source", "免费网页模式需要直播视频链接或视频 ID，不支持 liveChatId。")
+        self.context, self.initial = None, None
+        self.video = video
         response = await self.request("GET", "/live_chat", params={"v": video, "is_popout": "1", "hl": "en"})
-        data = extract_json(response.text, r'(?:var\s+ytInitialData\s*=|window\["ytInitialData"\]\s*=|ytInitialData\s*=)')
-        cfg = {}
-        for match in re.finditer(r'ytcfg\.set\s*\(', response.text):
-            try:
-                value = json.JSONDecoder().raw_decode(response.text[match.end():].lstrip())[0]
-                if isinstance(value, dict):
-                    cfg.update(value)
-            except ValueError:
-                continue
-        if not isinstance(data, dict):
-            raise SourceError("web_protocol", "无法解析 YouTube 聊天网页，可能需要登录/验证或接口已变化。")
-        renderer = data.get("contents", {}).get("liveChatRenderer", {})
+        data, cfg, player = page_state(response.text)
+        renderer = find_chat_renderer(data)
+        check_page_access("" if continuation(renderer)[0] else response.text, player)
+        diagnostics = [page_diagnostic("聊天页", response, data, renderer)]
+        context = cfg.get("INNERTUBE_CONTEXT")
+        client = context.get("client") if isinstance(context, dict) else None
+        if not continuation(renderer)[0] or not isinstance(client, dict) or not client.get("clientVersion"):
+            # Some public pages provide bootstrap data on /watch rather than /live_chat.
+            response = await self.request("GET", "/watch", params={"v": video, "hl": "en"})
+            watch_data, watch_cfg, player = page_state(response.text)
+            watch_renderer = find_chat_renderer(watch_data)
+            check_page_access("" if continuation(watch_renderer)[0] else response.text, player)
+            diagnostics.append(page_diagnostic("观看页", response, watch_data, watch_renderer))
+            cfg.update(watch_cfg)
+            if continuation(watch_renderer)[0]:
+                renderer = watch_renderer
+            if watch_data is not None:
+                data = watch_data
+        if data is None:
+            raise SourceError("web_protocol", "YouTube 聊天页和观看页均未提供可解析的数据。请确认链接在浏览器中可公开观看；若可观看但仍失败，需要更新网页协议适配。" + "；".join(diagnostics))
+        if renderer.get("isReplay") or renderer.get("is_replay"):
+            raise SourceError("chat_replay", "当前为直播聊天回放，免费网页模式仅支持正在直播的实时聊天。")
         # Select the unfiltered 'Live chat' continuation rather than 'Top chat'.
         menu = renderer.get("header", {}).get("liveChatHeaderRenderer", {}).get("viewSelector", {}).get("sortFilterSubMenuRenderer", {})
         for option in menu.get("subMenuItems", []):
@@ -130,9 +232,9 @@ class WebChatSource:
         token, _ = continuation(renderer)
         context = cfg.get("INNERTUBE_CONTEXT")
         if not token:
-            raise SourceError("chat_unavailable", "无法读取公开直播聊天：直播未开始、已结束、聊天关闭，或网页要求登录/验证。")
+            raise SourceError("chat_unavailable", "未取得实时聊天令牌；可能是聊天未开放或页面结构已变化。" + "；".join(diagnostics))
         if not isinstance(context, dict) or not isinstance(context.get("client"), dict) or not context["client"].get("clientVersion"):
-            raise SourceError("web_protocol", "YouTube 网页协议已变化，无法获取聊天客户端配置；请更新程序或切换官方 API。")
+            raise SourceError("web_protocol", "YouTube 网页协议已变化，无法获取聊天客户端配置；请更新程序或切换官方 API。" + "；".join(diagnostics))
         self.context, self.initial = context, renderer
         self.api_key = cfg.get("INNERTUBE_API_KEY", "")
         self.client_name = str(cfg.get("INNERTUBE_CONTEXT_CLIENT_NAME", 1))

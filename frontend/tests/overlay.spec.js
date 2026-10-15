@@ -293,3 +293,39 @@ test('original stays above ordered translations including an identical source-la
   send({ type: 'translation', id: 'multi-one', translations: rows })
   await expect(page.locator('yt-live-chat-text-message-renderer')).toHaveCount(0)
 })
+
+
+test('offline demo renders every Google target language without skipped extra rows', async ({ page, request, context }) => {
+  const targets = ['zh-Hant', 'ja', 'fr', 'de', 'ko', 'es', 'en', 'zh-Hans']
+  await request.put('/api/config', { data: { target_languages: targets } })
+  await page.unroute('**/api/languages*')
+  // Demo must not send actual chat translation or diagnostic requests.
+  const diagnostics = []
+  page.on('request', req => { if (req.url().includes('/api/translation/test')) diagnostics.push(req.url()) })
+  await page.goto('/')
+  await expect(page.locator('.language-stack li')).toHaveCount(8)
+  await page.getByRole('button', { name: '体验演示' }).click()
+  await expect(page.getByRole('status')).toContainText('八种常用语言均有固定译文')
+  const preview = page.frameLocator('iframe')
+  const rows = preview.locator('[data-message-id="demo-0"] .translation-row')
+  await expect(rows).toHaveCount(8)
+  await expect(preview.locator('[data-message-id="demo-0"] .translation')).toHaveCount(8)
+  expect(await rows.evaluateAll(nodes => nodes.map(node => node.dataset.language))).toEqual(targets)
+  expect(await rows.evaluateAll(nodes => nodes.every(node => node.dataset.status === 'complete'))).toBe(true)
+  await expect(preview.locator('[data-message-id="demo-0"] .translation-placeholder')).toHaveCount(0)
+  const overlay = await context.newPage()
+  await overlay.goto('/overlay')
+  await expect(overlay.locator('[data-message-id="demo-0"] .translation')).toHaveCount(8)
+  expect(diagnostics).toEqual([])
+  await overlay.close()
+})
+
+
+test('demo explains unsupported Azure sample instead of a generic skipped label', async ({ page, request }) => {
+  await request.put('/api/config', { data: { translation_provider: 'azure', target_languages: ['it', 'ja'] } })
+  await page.goto('/')
+  await page.getByRole('button', { name: '体验演示' }).click()
+  const preview = page.frameLocator('iframe')
+  await expect(preview.locator('[data-message-id="demo-0"] [data-language="it"]')).toContainText('演示暂无该语言样例')
+  await expect(preview.locator('[data-message-id="demo-0"] [data-language="ja"] .translation')).toContainText('こんにちは')
+})

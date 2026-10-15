@@ -154,3 +154,68 @@ async def test_disabling_translation_removes_waiting_rows():
     assert hub.messages['one']['translation_status'] == 'skipped'
     assert hub.pool is None
     await hub.stop()
+
+
+async def test_demo_covers_all_google_languages_for_every_sample_without_network():
+    from app.config import GOOGLE_LANGUAGES
+    from app.hub import DEMO_SAMPLES
+    targets = [item['code'] for item in GOOGLE_LANGUAGES]
+    hub = ChatHub(Config(target_languages=targets), None, None)
+    hub.mode = 'demo'
+    for index, sample in enumerate(DEMO_SAMPLES):
+        mid = f'demo-{index}'
+        hub.add(message(mid, sample[1]))
+        hub.translate_demo(mid)
+        rows = hub.messages[mid]['translations']
+        assert [row['language'] for row in rows] == targets
+        assert all(row['status'] == 'complete' and row['text'] for row in rows), rows
+    assert hub.pool is None
+
+
+async def test_live_google_pool_translates_every_selected_language():
+    from app.config import GOOGLE_LANGUAGES
+    targets = [item['code'] for item in GOOGLE_LANGUAGES]
+    calls = []
+    async def respond(request):
+        code = request.url.params['tl']
+        calls.append(code)
+        return httpx.Response(200, json=[[[f'translated-{code}']], None, 'zh-CN'])
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        hub = ChatHub(Config(translation_enabled=True, target_languages=targets), None, client)
+        hub.mode = 'live'
+        hub.google.interval = 0
+        await hub.setup_translation()
+        try:
+            hub.add(message())
+            await asyncio.wait_for(hub.pool.queue.join(), 1)
+            rows = hub.messages['one']['translations']
+            assert [row['language'] for row in rows] == targets
+            assert all(row['status'] == 'complete' and row['text'] for row in rows)
+            assert calls == ['zh-CN', 'zh-TW', 'en', 'ja', 'ko', 'es', 'fr', 'de']
+        finally:
+            await hub.stop()
+
+
+async def test_demo_language_added_during_session_has_offline_translation():
+    hub = ChatHub(Config(target_languages=['zh-Hans']), None, None)
+    await hub.connect(demo=True)
+    try:
+        await asyncio.sleep(.8)
+        await hub.configure(Config(target_languages=['ja', 'fr', 'zh-Hans']))
+        rows = hub.messages['demo-0']['translations']
+        assert [row['language'] for row in rows] == ['ja', 'fr', 'zh-Hans']
+        assert all(row['status'] == 'complete' and row['text'] for row in rows)
+        assert rows[0]['text'] == hub.messages['demo-0']['original']
+        assert rows[1]['text'].startswith('Bonjour')
+    finally:
+        await hub.stop()
+
+
+def test_demo_explains_unsupported_azure_language():
+    hub = ChatHub(Config(translation_provider='azure', target_languages=['it', 'de']), None, None)
+    hub.mode = 'demo'
+    hub.add(message('demo-0'))
+    hub.translate_demo('demo-0')
+    italian, german = hub.messages['demo-0']['translations']
+    assert italian['status'] == 'skipped' and italian['reason'] == 'demo_unsupported'
+    assert german['status'] == 'complete' and german['text']

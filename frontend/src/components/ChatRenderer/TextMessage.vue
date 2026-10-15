@@ -25,7 +25,7 @@
         <li v-for="row in translations" :key="row.language" :lang="row.language" :data-language="row.language" :data-status="row.status" class="translation-row">
           <span class="translation-language">{{ row.language }}</span>
           <span v-if="row.text" class="translation" dir="auto">{{ row.text }}</span>
-          <span v-else class="translation-placeholder">{{ row.status === 'pending' ? '翻译中…' : row.status === 'failed' ? '翻译暂不可用' : '已跳过' }}</span>
+          <span v-else class="translation-placeholder">{{ row.status === 'pending' ? '翻译中…' : row.status === 'failed' ? '翻译暂不可用' : row.reason === 'demo_unsupported' ? '演示暂无该语言样例' : '已跳过' }}</span>
         </li>
       </ul>
       <span v-else-if="translation" class="translation" dir="auto">{{ translation }}</span>

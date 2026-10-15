@@ -57,9 +57,10 @@ def smoke(binary: Path):
                 persisted = json.loads((Path(directory) / "config.json").read_text("utf-8"))
                 assert persisted["target_language"] == "ja"
                 assert persisted["target_languages"] == ["ja"]
-                request("/api/config", "PUT", {"target_languages": ["zh-Hans", "en"]})
+                targets = ["zh-Hans", "zh-Hant", "en", "ja", "ko", "es", "fr", "de"]
+                request("/api/config", "PUT", {"target_languages": targets})
                 persisted = json.loads((Path(directory) / "config.json").read_text("utf-8"))
-                assert persisted["target_languages"] == ["zh-Hans", "en"]
+                assert persisted["target_languages"] == targets
                 clicked_at = datetime.now(timezone.utc).isoformat()
                 # No YouTube key: exercise the packaged API without external requests.
                 connection = json.loads(request("/api/connect", "POST", {"started_at": clicked_at}))
@@ -76,19 +77,20 @@ def smoke(binary: Path):
                                 [event] if event["type"] == "translation" else [])
                             for message in candidates:
                                 rows = message.get("translations", [])
-                                if len(rows) == 2 and all(row["status"] == "complete" for row in rows):
-                                    assert [row["language"] for row in rows] == ["zh-Hans", "en"]
+                                if len(rows) == len(targets) and all(row["status"] == "complete" for row in rows):
+                                    assert [row["language"] for row in rows] == targets
                                     assert all(row["text"] for row in rows)
                                     return message["id"]
                         raise AssertionError("Bundled WebSocket did not deliver multilingual demo")
                 mid = asyncio.run(check_socket())
-                request("/api/config", "PUT", {"target_languages": ["en", "zh-Hans"]})
+                reordered = list(reversed(targets))
+                request("/api/config", "PUT", {"target_languages": reordered})
 
                 async def check_reordered_snapshot():
                     async with websockets.connect(f"ws://127.0.0.1:{port}/ws", proxy=None) as ws:
                         snapshot = json.loads(await asyncio.wait_for(ws.recv(), 5))
                         message = next(message for message in snapshot["messages"] if message["id"] == mid)
-                        assert [row["language"] for row in message["translations"]] == ["en", "zh-Hans"]
+                        assert [row["language"] for row in message["translations"]] == reordered
                         assert all(row["status"] == "complete" and row["text"] for row in message["translations"])
                 asyncio.run(check_reordered_snapshot())
                 request("/api/disconnect", "POST")

@@ -5,18 +5,9 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from .config import Config
+from .demo import DEMO_SAMPLES, demo_translation
 from .translation import AzureTranslator, GoogleWebTranslator, TranslationError, TranslationPool, Result
 from .youtube import SourceError, map_item
-
-
-DEMO_SAMPLES = [
-    ("Mika", "こんにちは！配信楽しみにしていました 🌸", "你好！一直很期待这次直播 🌸", "ja"),
-    ("Alex", "Hello from London! Love this stream 💚", "来自伦敦的问候！好喜欢这场直播 💚", "en"),
-    ("小雨", "晚上好，今天也要加油呀！", "晚上好，今天也要加油呀！", "zh-Hans"),
-    ("Sofia", "¡Qué bonito! Gracias por compartir ✨", "太漂亮了！谢谢分享 ✨", "es"),
-    ("Min", "오늘 방송 정말 재밌어요!", "今天的直播真的很有趣！", "ko"),
-    ("测试观众", "<script>alert('文本安全测试')</script>", "<script>alert('文本安全测试')</script>", "zh-Hans"),
-]
 
 
 class ChatHub:
@@ -85,7 +76,7 @@ class ChatHub:
     def translation_rows(self, status="pending"):
         return [{"language": code, "text": "", "status": status} for code in self.config.target_languages]
 
-    def translated(self, mid: str, result: Result | None, status: str, target: str | None = None):
+    def translated(self, mid: str, result: Result | None, status: str, target: str | None = None, reason: str = ""):
         message = self.messages.get(mid)
         if message is None:
             return
@@ -93,7 +84,7 @@ class ChatHub:
         rows = message.setdefault("translations", self.translation_rows())
         for row in rows:
             if row["language"] == target:
-                row.update(text=result.text if result else "", status=status, source_language=result.language if result else "")
+                row.update(text=result.text if result else "", status=status, source_language=result.language if result else "", reason=reason)
         states = [row["status"] for row in rows]
         overall = ("pending" if "pending" in states else "failed" if "failed" in states
                    else "complete" if all(state == "complete" for state in states) else "skipped")
@@ -182,7 +173,7 @@ class ChatHub:
             await self.pool.close()
             self.pool = None
         if self.mode == "demo":
-            self.translation_state("demo", "演示译文为固定样例，不调用外部 API。")
+            self.translation_state("demo", "演示使用八种语言的固定译文，不调用外部 API。")
         elif not self.config.translation_enabled:
             self.translation_state("off", "翻译未开启。")
         elif self.config.translation_provider == "azure" and (not self.config.azure_key or not self.config.azure_region):
@@ -415,14 +406,12 @@ class ChatHub:
 
     def translate_demo(self, mid):
         index = int(mid.split("-")[-1]) % len(DEMO_SAMPLES)
-        _, original, chinese, language = DEMO_SAMPLES[index]
-        english = ["Hello! I've been looking forward to this stream 🌸",
-                   "Hello from London! Love this stream 💚", "Good evening, keep it up today!",
-                   "How beautiful! Thanks for sharing ✨", "Today's stream is really fun!", original][index]
+        language = DEMO_SAMPLES[index][3]
         for target in self.config.target_languages:
-            fixed = {"zh-Hans": chinese, "en": english}.get(target)
+            fixed = demo_translation(index, target)
             self.translated(mid, Result(fixed, language) if fixed else None,
-                            "complete" if fixed else "skipped", target)
+                            "complete" if fixed else "skipped", target,
+                            reason="" if fixed else "demo_unsupported")
 
     async def run_demo(self):
         self.set_status("demo", "演示模式：固定样例，不消耗 API 额度。")
