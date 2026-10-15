@@ -2,7 +2,7 @@
 
 免费抓取公开 YouTube 直播弹幕，使用 Google Translate 免 Key 网页接口翻译为多种语言，按自定义顺序显示在透明 OBS 浏览器源中。支持频道自定义表情、图片表情与贴纸。
 
-**当前源码更新尚未发布为新版本。** 旧 Release 的 EXE 不包含本页所述的全部最新改动；需要使用新功能时运行源码或自行重新构建。源码仅保留免费抓取和 Google Translate，不再提供官方 YouTube API、Azure 或相关密钥/模式设置。
+**v0.4.0** 仅保留免费抓取和 Google Translate，不再提供官方 YouTube API、Azure 或相关密钥/模式设置。Windows 下载见 [v0.4.0 Release](https://github.com/Miaowu-Mecci/Youtube-Chat-With-Translate/releases/tag/v0.4.0)，同时提供 EXE、含说明和许可证的 ZIP，以及 SHA-256 校验文件。旧版本 EXE 不包含本页所述的全部最新改动。
 
 ## 快速开始
 
@@ -104,6 +104,8 @@ npm test
 浏览器测试使用独立临时数据目录和本地服务器，不读取用户配置或消耗外部翻译额度。无须 gRPC/protobuf 或代码生成。详细验证记录见 `VALIDATION.md`。
 
 Windows 本机运行 `build-exe.cmd` 可构建 `dist/YouTubeOBSChat.exe` 并执行启动冒烟测试。必须在 Windows 构建 Windows EXE；Linux 不能直接生成 Windows EXE。打包包含前端、离线图片示例、文档和许可证，不包含用户数据。
+
+仅在用户明确要求发布 release 时创建发布标签并发布；日常源码修改、提交和推送不自动发布。
 
 ## 本地接口
 

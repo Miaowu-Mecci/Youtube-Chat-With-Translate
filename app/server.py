@@ -4,6 +4,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
+import anyio
 from curl_cffi import AsyncSession
 from fastapi import FastAPI, Request, WebSocket
 from fastapi.exceptions import RequestValidationError
@@ -158,7 +159,9 @@ def create_app(config_path: Path | None = None, source_factory=WebChatSource):
             hub.clients.discard(queue)
             sender.cancel()
             receiver.cancel()
-            await asyncio.gather(sender, receiver, return_exceptions=True)
+            # Finish child-task cleanup even if the ASGI cancellation scope closes concurrently.
+            with anyio.CancelScope(shield=True):
+                await asyncio.gather(sender, receiver, return_exceptions=True)
 
     dist = ROOT / "frontend" / "dist"
     if (dist / "assets").exists():
