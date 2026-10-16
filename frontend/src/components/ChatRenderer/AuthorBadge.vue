@@ -39,7 +39,7 @@ export default {
     },
     readableAuthorTypeText() {
       if (this.isAdmin) {
-        return '管理员'
+        return this.$t('管理员')
       }
       return constants.getShowGuardLevelText(this.privilegeType)
     }

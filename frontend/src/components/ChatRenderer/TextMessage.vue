@@ -16,15 +16,15 @@
               :class="{ 'chat-sticker': content.kind === 'sticker' }" :src="content.url" :alt="content.text" :title="content.text"
               :width="content.width" :height="content.height" :style="imageStyle(content)" referrerpolicy="no-referrer"
               @load="$emit('content-resize')" @error="imageFailed(content.url)">
-            <span v-else class="emote-fallback" :title="'表情图片加载失败'">{{ content.text }}</span>
+            <span v-else class="emote-fallback" :title="$t('表情图片加载失败')">{{ content.text }}</span>
           </span>
         </template>
 
       </span>
-      <ul v-if="translations && translations.length" class="translation-list" aria-label="多语言译文">
+      <ul v-if="translations && translations.length" class="translation-list" :aria-label="$t('多语言译文')">
         <li v-for="row in translations" :key="row.language" :lang="row.language" :data-language="row.language" :data-status="row.status" class="translation-row">
           <span v-if="row.text" class="translation" dir="auto">{{ row.text }}</span>
-          <span v-else class="translation-placeholder">{{ row.status === 'pending' ? '翻译中…' : row.status === 'failed' ? '翻译暂不可用' : row.reason === 'demo_unsupported' ? '演示暂无该语言样例' : '已跳过' }}</span>
+          <span v-else class="translation-placeholder">{{ $t(row.status === 'pending' ? '翻译中…' : row.status === 'failed' ? '翻译暂不可用' : row.reason === 'demo_unsupported' ? '演示暂无该语言样例' : '已跳过') }}</span>
         </li>
       </ul>
       <span v-else-if="translation" class="translation" dir="auto">{{ translation }}</span>

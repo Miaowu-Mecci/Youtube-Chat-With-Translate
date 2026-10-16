@@ -2,75 +2,75 @@
   <overlay v-if="isOverlay" />
   <div v-else class="dashboard">
     <aside class="sidebar">
-      <a class="brand" href="/"><span class="brand-mark">译</span><span>LiveChat<span class="brand-sub">YOUTUBE · OBS</span></span></a>
-      <div class="side-label">工作空间</div>
-      <a class="nav-item active" href="#connection"><span>◉</span> 直播弹幕</a>
-      <a class="nav-item" href="#translation"><span>文</span> 多语言翻译</a>
-      <a class="nav-item" href="#appearance"><span>◐</span> 外观与样式</a>
-      <div class="side-bottom"><span class="local-dot"></span> 本地运行<span class="side-note">你的直播，你的表达。</span></div>
+      <a class="brand" href="/"><span class="brand-mark">{{ $t('译') }}</span><span>LiveChat<span class="brand-sub">YOUTUBE · OBS</span></span></a>
+      <div class="side-label">{{ $t('工作空间') }}</div>
+      <a class="nav-item active" href="#connection"><span>◉</span> {{ $t('直播弹幕') }}</a>
+      <a class="nav-item" href="#translation"><span>文</span> {{ $t('多语言翻译') }}</a>
+      <a class="nav-item" href="#appearance"><span>◐</span> {{ $t('外观与样式') }}</a>
+      <div class="side-bottom"><span class="local-dot"></span> {{ $t('本地运行') }}<span class="side-note">{{ $t('你的直播，你的表达。') }}</span></div>
     </aside>
     <main class="workspace">
-      <header class="topbar"><span>工作空间 <span class="crumb">/</span> 直播弹幕</span><span class="version">v0.4.0 · MULTILINGUAL</span></header>
-      <div class="page-title"><div><div class="eyebrow">CONNECT WITHOUT LANGUAGE BARRIERS</div><h1>让每一句话，都被听懂<span>。</span></h1><p>将 YouTube 直播弹幕带入 OBS，让每一种语言都有位置。</p></div><button class="secondary" :disabled="busy" @click="action('demo', true)">▷ 体验演示</button></div>
-      <div class="toast" role="status" v-if="notice">{{ notice }}</div>
+      <header class="topbar"><span class="breadcrumb">{{ $t('工作空间') }} <span class="crumb">/</span> {{ $t('直播弹幕') }}</span><div class="topbar-tools"><span class="version">v0.4.0 · MULTILINGUAL</span><label class="ui-language" for="ui-language">Language<select id="ui-language" v-model="uiLocale" aria-label="Language"><option v-for="locale in uiLocales" :key="locale.code" :value="locale.code">{{ locale.name }}</option></select></label></div></header>
+      <div class="page-title"><div><div class="eyebrow">{{ $t('CONNECT WITHOUT LANGUAGE BARRIERS') }}</div><h1>{{ $t('让每一句话，都被听懂') }}<span>{{ $t('。') }}</span></h1><p>{{ $t('将 YouTube 直播弹幕带入 OBS，让每一种语言都有位置。') }}</p></div><button class="secondary" :disabled="busy" @click="action('demo', true)">▷ {{ $t('体验演示') }}</button></div>
+      <div class="toast" role="status" v-if="notice">{{ $uiMessage(notice) }}</div>
       <div class="columns">
         <div class="settings">
           <section class="card" id="connection">
-            <div class="card-heading"><h2><span class="step">01</span> 连接直播间</h2><span class="status-pill" :class="status.connection">{{ statusLabel }}</span></div>
-            <label for="source">YouTube 直播链接 / ID</label>
+            <div class="card-heading"><h2><span class="step">01</span> {{ $t('连接直播间') }}</h2><span class="status-pill" :class="status.connection">{{ statusLabel }}</span></div>
+            <label for="source">{{ $t('YouTube 直播链接 / ID') }}</label>
             <input id="source" v-model="form.source" placeholder="https://www.youtube.com/watch?v=…" autocomplete="off">
-            <p class="small">输入公开直播视频链接，即可免费接收弹幕。只支持正在直播的公开聊天。</p>
-            <div class="button-row"><button class="primary" :disabled="busy" @click="action('connect', true)">连接直播间 <span>→</span></button><button class="secondary" :disabled="busy" @click="action('disconnect')">断开</button></div>
-            <p class="connection-message">{{ status.message }}</p>
-            <p class="small">仅收录点击「连接直播间」后发布的新弹幕，不显示或翻译此前的历史弹幕。</p>
-            <p v-if="status.chat_started_at" class="small">已过滤 {{ status.ignored_history || 0 }} 条历史弹幕；自动重连继续使用本次连接的起点。</p>
+            <p class="small">{{ $t('输入公开直播视频链接，即可免费接收弹幕。只支持正在直播的公开聊天。') }}</p>
+            <div class="button-row"><button class="primary" :disabled="busy" @click="action('connect', true)">{{ $t('连接直播间') }} <span>→</span></button><button class="secondary" :disabled="busy" @click="action('disconnect')">{{ $t('断开') }}</button></div>
+            <p class="connection-message">{{ $uiMessage(status.message) }}</p>
+            <p class="small">{{ $t('仅收录点击「连接直播间」后发布的新弹幕，不显示或翻译此前的历史弹幕。') }}</p>
+            <p v-if="status.chat_started_at" class="small">{{ $t('已过滤 {count} 条历史弹幕；自动重连继续使用本次连接的起点。', { count: status.ignored_history || 0 }) }}</p>
           </section>
 
           <section class="card" id="translation">
-            <div class="card-heading"><h2><span class="step">02</span> 多语言翻译</h2><label class="switch"><input type="checkbox" v-model="form.translation_enabled" aria-label="开启翻译"><span></span></label></div>
-            <p class="card-description">原文即时出现，译文随后补上。让不同语言的观众一起参与。</p>
-            <p class="small">Google Translate 自动识别原文语言，按下方顺序翻译。接口可能限流，失败时保留原文。</p>
-            <div class="language-heading"><label>目标语言与显示顺序</label><span>{{ form.target_languages.length }} / 8</span></div>
-            <ol class="language-stack" aria-label="已选目标语言">
+            <div class="card-heading"><h2><span class="step">02</span> {{ $t('多语言翻译') }}</h2><label class="switch"><input type="checkbox" v-model="form.translation_enabled" :aria-label="$t('开启翻译')"><span></span></label></div>
+            <p class="card-description">{{ $t('原文即时出现，译文随后补上。让不同语言的观众一起参与。') }}</p>
+            <p class="small">{{ $t('Google Translate 自动识别原文语言，按下方顺序翻译。接口可能限流，失败时保留原文。') }}</p>
+            <div class="language-heading"><label>{{ $t('目标语言与显示顺序') }}</label><span>{{ form.target_languages.length }} / 8</span></div>
+            <ol class="language-stack" :aria-label="$t('已选目标语言')">
               <li v-for="(code, index) in form.target_languages" :key="code" draggable="true" @dragstart="dragIndex = index" @dragover.prevent @drop.prevent="dropLanguage(index)" @dragend="dragIndex = null" :data-language="code">
                 <span class="language-number">{{ String(index + 1).padStart(2, '0') }}</span>
                 <div class="language-name"><strong>{{ languageName(code) }}</strong><small>{{ code }}</small></div>
                 <div class="language-actions">
-                  <button :aria-label="'上移 ' + languageName(code)" :disabled="index === 0" @click="moveLanguage(index, index - 1)">↑</button>
-                  <button :aria-label="'下移 ' + languageName(code)" :disabled="index === form.target_languages.length - 1" @click="moveLanguage(index, index + 1)">↓</button>
-                  <button :aria-label="'移除 ' + languageName(code)" @click="removeLanguage(index)">×</button>
+                  <button :aria-label="$t('上移 {name}', { name: languageName(code) })" :disabled="index === 0" @click="moveLanguage(index, index - 1)">↑</button>
+                  <button :aria-label="$t('下移 {name}', { name: languageName(code) })" :disabled="index === form.target_languages.length - 1" @click="moveLanguage(index, index + 1)">↓</button>
+                  <button :aria-label="$t('移除 {name}', { name: languageName(code) })" @click="removeLanguage(index)">×</button>
                 </div>
               </li>
             </ol>
-            <p v-if="!form.target_languages.length" class="small" aria-label="无目标语言">未选择翻译语言，仅显示原文。</p>
-            <div class="add-language"><select id="language" v-model="languageToAdd" aria-label="添加目标语言"><option value="" disabled>＋ 添加一种语言</option><option v-for="language in availableLanguages" :key="language.code" :value="language.code">{{ language.name }} · {{ language.code }}</option></select><button class="secondary" :disabled="!languageToAdd || form.target_languages.length >= 8" @click="addLanguage">添加</button></div>
-            <p class="small">拖动语言卡片或使用 ↑ ↓ 调整顺序，保存后同步到 OBS。最多选择 8 种；每种语言单独请求，语言越多，翻译等待越长。</p>
-            <div class="translation-flow"><template v-if="form.target_languages.length"><span>原文</span><span>→</span></template><strong>{{ targetName }}</strong><span v-if="form.target_languages.length" class="flow-badge">按序逐行显示</span></div>
-            <div class="button-row"><button class="secondary" :disabled="busy || !form.target_languages.length" @click="testTranslation">保存并测试翻译</button><button class="secondary" :disabled="busy || !form.target_languages.length" @click="resumeTranslation">恢复翻译</button></div>
-            <p class="small">测试会向 Google 发送固定外语样例，不需要连接 YouTube。测试翻译不受弹幕翻译开关控制。</p>
-            <p class="connection-message" role="status" aria-label="翻译测试结果" v-if="testResult">{{ testResult }}</p>
-            <p class="connection-message">{{ status.translation_message }}</p>
-            <p v-if="status.translation_counts" class="small" aria-label="翻译进度">当前保留弹幕：等待 {{ status.translation_counts.pending }} · 已完成 {{ status.translation_counts.complete }} · 失败 {{ status.translation_counts.failed }} · 跳过 {{ status.translation_counts.skipped }}。Google 每秒最多请求约一种语言；恢复翻译会重新处理未完成消息。</p>
-            <p class="small" v-if="languageNotice">{{ languageNotice }}</p>
+            <p v-if="!form.target_languages.length" class="small" :aria-label="$t('无目标语言')">{{ $t('未选择翻译语言，仅显示原文。') }}</p>
+            <div class="add-language"><select id="language" v-model="languageToAdd" :aria-label="$t('添加目标语言')"><option value="" disabled>＋ {{ $t('添加一种语言') }}</option><option v-for="language in availableLanguages" :key="language.code" :value="language.code">{{ languageName(language.code) }} · {{ language.code }}</option></select><button class="secondary" :disabled="!languageToAdd || form.target_languages.length >= 8" @click="addLanguage">{{ $t('添加') }}</button></div>
+            <p class="small">{{ $t('拖动语言卡片或使用 ↑ ↓ 调整顺序，保存后同步到 OBS。最多选择 8 种；每种语言单独请求，语言越多，翻译等待越长。') }}</p>
+            <div class="translation-flow"><template v-if="form.target_languages.length"><span>{{ $t('原文') }}</span><span>→</span></template><strong>{{ targetName }}</strong><span v-if="form.target_languages.length" class="flow-badge">{{ $t('按序逐行显示') }}</span></div>
+            <div class="button-row"><button class="secondary" :disabled="busy || !form.target_languages.length" @click="testTranslation">{{ $t('保存并测试翻译') }}</button><button class="secondary" :disabled="busy || !form.target_languages.length" @click="resumeTranslation">{{ $t('恢复翻译') }}</button></div>
+            <p class="small">{{ $t('测试会向 Google 发送固定外语样例，不需要连接 YouTube。测试翻译不受弹幕翻译开关控制。') }}</p>
+            <p class="connection-message" role="status" :aria-label="$t('翻译测试结果')" v-if="testResult">{{ $uiMessage(testResult) }}</p>
+            <p class="connection-message">{{ $uiMessage(status.translation_message) }}</p>
+            <p v-if="status.translation_counts" class="small" :aria-label="$t('翻译进度')">{{ $t('当前保留弹幕：等待 {pending} · 已完成 {complete} · 失败 {failed} · 跳过 {skipped}。Google 每秒最多请求约一种语言；恢复翻译会重新处理未完成消息。', status.translation_counts) }}</p>
+            <p class="small" v-if="languageNotice">{{ $uiMessage(languageNotice) }}</p>
           </section>
 
           <section class="card" id="appearance">
-            <div class="card-heading"><h2><span class="step">03</span> 外观与样式</h2><span class="small">实时预览</span></div>
-            <div class="field-row"><div><label for="font-size">字号 <span class="saved">{{ form.style.font_size }} px</span></label><input id="font-size" type="range" min="10" max="72" v-model.number="form.style.font_size"></div><div><label for="max-messages">保留消息数量</label><input id="max-messages" type="number" min="10" max="500" v-model.number="form.style.max_messages"></div></div>
-            <div class="color-row"><label>原文颜色 <input aria-label="原文颜色" type="color" v-model="form.style.color"></label><label>译文颜色 <input aria-label="译文颜色" type="color" v-model="form.style.translation_color"></label><label class="checkbox-label"><input type="checkbox" v-model="form.style.show_avatar"> 显示头像</label></div>
-            <label for="custom-css">自定义 CSS <span class="label-note">兼容 blivechat 普通弹幕选择器</span></label>
+            <div class="card-heading"><h2><span class="step">03</span> {{ $t('外观与样式') }}</h2><span class="small">{{ $t('实时预览') }}</span></div>
+            <div class="field-row"><div><label for="font-size">{{ $t('字号') }} <span class="saved">{{ form.style.font_size }} px</span></label><input id="font-size" type="range" min="10" max="72" v-model.number="form.style.font_size"></div><div><label for="max-messages">{{ $t('保留消息数量') }}</label><input id="max-messages" type="number" min="10" max="500" v-model.number="form.style.max_messages"></div></div>
+            <div class="color-row"><label>{{ $t('原文颜色') }} <input :aria-label="$t('原文颜色')" type="color" v-model="form.style.color"></label><label>{{ $t('译文颜色') }} <input :aria-label="$t('译文颜色')" type="color" v-model="form.style.translation_color"></label><label class="checkbox-label"><input type="checkbox" v-model="form.style.show_avatar"> {{ $t('显示头像') }}</label></div>
+            <label for="custom-css">{{ $t('自定义 CSS') }} <span class="label-note">{{ $t('兼容 blivechat 普通弹幕选择器') }}</span></label>
             <textarea id="custom-css" v-model="form.style.custom_css" rows="5" spellcheck="false" placeholder=".translation { font-weight: 600; }"></textarea>
-            <div class="button-row"><button class="primary" :disabled="busy" @click="save()">保存设置</button><button class="secondary" @click="copy(css, 'CSS 已复制')">复制 CSS</button></div>
+            <div class="button-row"><button class="primary" :disabled="busy" @click="save()">{{ $t('保存设置') }}</button><button class="secondary" @click="copy(css, 'CSS 已复制')">{{ $t('复制 CSS') }}</button></div>
           </section>
         </div>
 
         <div class="preview-column">
-          <section class="card preview-card"><div class="card-heading"><h2>评论栏预览</h2><span class="preview-live"><span class="local-dot"></span> LIVE PREVIEW</span></div><div class="preview-screen"><div class="preview-caption">YOUR STREAM, CONNECTED.</div><iframe ref="preview" src="/overlay" title="OBS 评论栏实时预览" @load="draftPreview"></iframe><div v-if="!hasMessages" class="empty-state"><span>文 ↔ A</span><strong>跨越语言，开始对话</strong><p>连接直播间或点击「体验演示」<br>这里将展示你的多语言评论栏</p></div></div><div class="preview-footer"><span>透明背景 · 原文在上，多语言依序排列</span><a href="/overlay" target="_blank" rel="noreferrer">独立预览 ↗</a></div></section>
-          <section class="card obs-card"><div class="card-heading"><h2>添加到 OBS</h2><span class="obs-badge">浏览器源</span></div><p class="card-description">在 OBS 中添加「浏览器」源，粘贴下方地址。</p><div class="url-box"><code>{{ overlayUrl }}</code><button aria-label="复制 OBS 地址" @click="copy(overlayUrl, 'OBS 地址已复制')">复制</button></div><div class="obs-tip"><span>建议尺寸</span><strong>480 × 720</strong></div><p class="small">OBS 自定义 CSS 保留透明背景设置即可。页面不包含控制按钮，多个浏览器源共享同一直播连接。</p></section>
-          <div class="privacy-note"><span>⌁</span><p>开启翻译后，消息的文字部分会发送至 Google。演示使用本地固定译文，不访问翻译服务。</p></div>
+          <section class="card preview-card"><div class="card-heading"><h2>{{ $t('评论栏预览') }}</h2><span class="preview-live"><span class="local-dot"></span> {{ $t('LIVE PREVIEW') }}</span></div><div class="preview-screen"><div class="preview-caption">{{ $t('YOUR STREAM, CONNECTED.') }}</div><iframe ref="preview" src="/overlay" :title="$t('OBS 评论栏实时预览')" @load="draftPreview"></iframe><div v-if="!hasMessages" class="empty-state"><span>文 ↔ A</span><strong>{{ $t('跨越语言，开始对话') }}</strong><p>{{ $t('连接直播间或点击「体验演示」') }}<br>{{ $t('这里将展示你的多语言评论栏') }}</p></div></div><div class="preview-footer"><span>{{ $t('透明背景 · 原文在上，多语言依序排列') }}</span><a href="/overlay" target="_blank" rel="noreferrer">{{ $t('独立预览') }} ↗</a></div></section>
+          <section class="card obs-card"><div class="card-heading"><h2>{{ $t('添加到 OBS') }}</h2><span class="obs-badge">{{ $t('浏览器源') }}</span></div><p class="card-description">{{ $t('在 OBS 中添加「浏览器」源，粘贴下方地址。') }}</p><div class="url-box"><code>{{ overlayUrl }}</code><button :aria-label="$t('复制 OBS 地址')" @click="copy(overlayUrl, 'OBS 地址已复制')">{{ $t('复制') }}</button></div><div class="obs-tip"><span>{{ $t('建议尺寸') }}</span><strong>480 × 720</strong></div><p class="small">{{ $t('OBS 自定义 CSS 保留透明背景设置即可。页面不包含控制按钮，多个浏览器源共享同一直播连接。') }}</p></section>
+          <div class="privacy-note"><span>⌁</span><p>{{ $t('开启翻译后，消息的文字部分会发送至 Google。演示使用本地固定译文，不访问翻译服务。') }}</p></div>
         </div>
       </div>
-      <footer class="page-footer"><span>Made for conversations, in every language.</span><a href="https://github.com/xfgryujk/blivechat" target="_blank" rel="noreferrer">渲染组件源自 blivechat · MIT ↗</a></footer>
+      <footer class="page-footer"><span>{{ $t('Made for conversations, in every language.') }}</span><a href="https://github.com/xfgryujk/blivechat" target="_blank" rel="noreferrer">{{ $t('渲染组件源自 blivechat · MIT') }} ↗</a></footer>
     </main>
   </div>
 </template>
@@ -78,6 +78,7 @@
 <script>
 import Overlay from './Overlay.vue'
 import { makeCSS } from './style'
+import { languageState, locales, setLocale } from './i18n'
 const initial = { source: '', target_languages: ['zh-Hans'], translation_enabled: false, target_language: 'zh-Hans',
   style: { font_size: 24, color: '#ffffff', translation_color: '#8de1cb', show_avatar: true, max_messages: 100, custom_css: '' } }
 export default {
@@ -87,11 +88,13 @@ export default {
     languageToAdd: '', dragIndex: null, testResult: '', languages: [{ code: 'zh-Hans', name: '简体中文' }], languageNotice: '', notice: '', busy: false, hasMessages: false,
     socket: null, retryTimer: null, stopped: false, ready: false }),
   computed: {
+    uiLocale: { get() { return languageState.locale }, set: setLocale },
+    uiLocales() { return locales },
     overlayUrl() { return `${location.origin}/overlay` },
     css() { return makeCSS(this.form.style) },
-    targetName() { return this.form.target_languages.map(this.languageName).join(' → ') || '仅显示原文' },
+    targetName() { return this.form.target_languages.map(this.languageName).join(' → ') || this.$t('仅显示原文') },
     availableLanguages() { return this.languages.filter(item => !this.form.target_languages.includes(item.code)) },
-    statusLabel() { return { idle: '未连接', connecting: '连接中', connected: '已连接', reconnecting: '重连中', demo: '演示中', error: '连接异常', ended: '已结束' }[this.status.connection] || '未连接' }
+    statusLabel() { return this.$t({ idle: '未连接', connecting: '连接中', connected: '已连接', reconnecting: '重连中', demo: '演示中', error: '连接异常', ended: '已结束' }[this.status.connection] || '未连接') }
   },
   watch: { 'form.style': { deep: true, handler() { this.draftPreview() } } },
   async mounted() {
@@ -124,7 +127,7 @@ export default {
         this.languageNotice = ''
       } catch { this.languageNotice = '语言列表暂不可用，请刷新页面重试。' }
     },
-    languageName(code) { return this.languages.find(item => item.code === code)?.name || code },
+    languageName(code) { return this.$t(this.languages.find(item => item.code === code)?.name || code) },
     addLanguage() {
       if (this.languageToAdd && this.form.target_languages.length < 8 && !this.form.target_languages.includes(this.languageToAdd)) this.form.target_languages.push(this.languageToAdd)
       this.languageToAdd = ''
@@ -142,7 +145,7 @@ export default {
       try {
         await this.persist()
         const result = await this.api('/api/translation/test', 'POST')
-        this.testResult = `测试成功：${result.original} → ${(result.translations || [{ text: result.translation }]).map(row => row.text).join(' / ')}`
+        this.testResult = { key: '测试成功：{original} → {translations}', values: { original: result.original, translations: (result.translations || [{ text: result.translation }]).map(row => row.text).join(' / ') } }
       } catch (error) { this.testResult = error.message }
       finally { this.busy = false }
     },
@@ -235,4 +238,22 @@ export default {
 .page-title { border-radius: 16px; }.card { border-radius: 16px; box-shadow: 0 8px 30px #203c2f05; }
 .preview-screen { background: radial-gradient(ellipse at 0 0, #375f50, transparent 70%), linear-gradient(145deg, #1c302a, #101c19); }
 .dashboard button:focus-visible { outline: 2px solid #3e9673; outline-offset: 3px; }
+.topbar { height: auto; min-height: 75px; gap: 16px; padding: 12px 0; flex-wrap: wrap; }
+.topbar-tools { margin-left: auto; display: flex; align-items: center; gap: 20px; }
+.dashboard .ui-language { display: flex; align-items: center; gap: 8px; margin: 0; white-space: nowrap; }
+.dashboard .ui-language select { width: auto; min-width: 112px; padding: 8px 10px; background: #fff; cursor: pointer; }
+.settings, .preview-column, .card, .page-title > div { min-width: 0; }
+.page-title > button { flex-shrink: 0; }
+.button-row { flex-wrap: wrap; }
+.card-heading { gap: 12px; }.card-heading h2 { min-width: 0; }
+.language-name { min-width: 0; overflow-wrap: anywhere; }
+.preview-footer { gap: 12px; }.preview-footer a { flex-shrink: 0; }
+.empty-state { padding: 0 16px; text-align: center; }
+.nav-item span { flex-shrink: 0; }
+@media (max-width: 1150px) { .topbar-tools .version { display: none; } }
+@media (max-width: 630px) {
+  .topbar { min-height: 60px; }.topbar .breadcrumb { display: none; }
+  .topbar-tools { width: 100%; justify-content: flex-end; }
+  .page-title { flex-direction: column; align-items: flex-start; }
+}
 </style>

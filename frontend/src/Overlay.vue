@@ -1,6 +1,6 @@
 <template>
   <div class="overlay-root"><chat-renderer ref="renderer" :maxNumber="config.style.max_messages">
-    <div v-if="ready" slot="start" class="overlay-start" role="status">弹幕姬开始工作</div>
+    <div v-if="ready" slot="start" class="overlay-start" role="status">{{ $t('弹幕姬开始工作') }}</div>
   </chat-renderer></div>
 </template>
 
