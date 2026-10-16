@@ -11,7 +11,7 @@ if errorlevel 1 goto failed
 .venv\Scripts\python.exe scripts\smoke_bundle.py dist\YouTubeOBSChat.exe
 if errorlevel 1 goto failed
 echo Build and smoke test finished: dist\YouTubeOBSChat.exe
-echo Share this EXE together with README.md, THIRD_PARTY_NOTICES.md and licenses.
+echo Share this EXE together with README.md, README.en.md, README.ja.md, THIRD_PARTY_NOTICES.md and licenses.
 pause
 exit /b 0
 :failed

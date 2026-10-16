@@ -36,7 +36,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path release-package, release-assets | Out-Null
-          Copy-Item dist/YouTubeOBSChat.exe, README.md, VALIDATION.md, THIRD_PARTY_NOTICES.md, LICENSE -Destination release-package
+          Copy-Item dist/YouTubeOBSChat.exe, README.md, README.en.md, README.ja.md, VALIDATION.md, THIRD_PARTY_NOTICES.md, LICENSE -Destination release-package
           Copy-Item licenses -Destination release-package -Recurse
           Compress-Archive -Path release-package/* -DestinationPath release-assets/YouTubeOBSChat-Windows-x64.zip
           Copy-Item dist/YouTubeOBSChat.exe -Destination release-assets

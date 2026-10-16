@@ -1,5 +1,7 @@
 # YouTube OBS 多语言弹幕
 
+**简体中文** | [English](README.en.md) | [日本語](README.ja.md)
+
 免费抓取公开 YouTube 直播弹幕，使用 Google Translate 免 Key 网页接口翻译为多种语言，按自定义顺序显示在透明 OBS 浏览器源中。支持频道自定义表情、图片表情与贴纸。
 
 **v0.5.0** 新增中文、日语和英语界面，继续使用免费抓取和免 Key 的 Google Translate。Windows 下载见 [v0.5.0 Release](https://github.com/Miaowu-Mecci/Youtube-Chat-With-Translate/releases/tag/v0.5.0)，同时提供 EXE、含说明和许可证的 ZIP，以及 SHA-256 校验文件。直接运行 EXE 无需安装 Python、Node.js 或 Git。
@@ -14,16 +16,20 @@
 
 ## 快速开始
 
-Windows 需要 Python 3.11+ 和 Node.js 22+，安装后重新打开终端。
+### Windows EXE（推荐）
 
-1. 运行 `install.cmd`，安装依赖并构建前端。
-2. 运行 `start.cmd`，保持终端打开，在浏览器访问 `http://127.0.0.1:12450`。
+1. 从 [v0.5.0 Release](https://github.com/Miaowu-Mecci/Youtube-Chat-With-Translate/releases/tag/v0.5.0) 下载 `YouTubeOBSChat.exe` 或附带说明与许可证的 ZIP。使用 ZIP 时先解压，无需安装 Python、Node.js 或 Git。
+2. 关闭旧程序，再双击 EXE。程序会自动打开设置页；保持终端窗口打开。也可手动访问 `http://127.0.0.1:12450`。
 3. 点击「体验演示」，离线查看八语言译文及图片表情。演示不访问外部直播或翻译服务。
 4. 粘贴正在直播的 YouTube 视频链接或 11 位视频 ID，点击「连接直播间」。
 5. 开启翻译，添加目标语言并排序，保存设置。可先点击「保存并测试翻译」验证 Google 是否可访问。
 6. OBS 添加「浏览器」源，地址为 `http://127.0.0.1:12450/overlay`，建议尺寸 480 × 720。
 
 无需申请或填写 API Key，也无需选择接入模式或翻译服务。语言选择、排序、样式、翻译开关和诊断按钮保留。
+
+### 从源码运行
+
+仅源码运行需要 Python 3.11+ 和 Node.js 22+，安装后重新打开终端。Windows 先运行 `install.cmd` 安装依赖并构建前端，再运行 `start.cmd`，打开 `http://127.0.0.1:12450`。
 
 非 Windows 环境或手动安装：
 
@@ -94,7 +100,7 @@ yt-live-chat-author-chip #author-name { font-weight: bold; }
 
 普通 CSS 可以覆盖默认 CSS layer，OBS 自定义 CSS 仍遵循浏览器常规层叠。需要支持 `@layer` 和 `:has()` 的新版 OBS 浏览器源。
 
-配置保存为数据目录下的 `config.json`。旧配置加载时会忽略已删除的接入模式、Key、服务和区域字段，保留直播链接、支持的目标语言、语言顺序与样式；下次保存时移除旧字段。不支持的旧目标语言会过滤，无剩余语言时使用简体中文。
+配置保存为数据目录下的 `config.json`。旧配置加载时会忽略已删除的接入模式、Key、服务和区域字段，保留直播链接、支持的目标语言、语言顺序与样式；下次保存时移除旧字段。不支持的旧目标语言会过滤，非空旧列表被全部过滤时使用简体中文。用户主动保存的空列表保持为空，仅显示原文。
 
 聊天历史只保留在内存，重启不恢复。最多保留 500 条消息，去重与删除 ID 各最多 10000 条。官方网页删除事件未必即时推送，无法保证删除实时同步。
 
