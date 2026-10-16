@@ -10,7 +10,7 @@
       <div class="side-bottom"><span class="local-dot"></span> {{ $t('本地运行') }}<span class="side-note">{{ $t('你的直播，你的表达。') }}</span></div>
     </aside>
     <main class="workspace">
-      <header class="topbar"><span class="breadcrumb">{{ $t('工作空间') }} <span class="crumb">/</span> {{ $t('直播弹幕') }}</span><div class="topbar-tools"><span class="version">v0.4.0 · MULTILINGUAL</span><label class="ui-language" for="ui-language">Language<select id="ui-language" v-model="uiLocale" aria-label="Language"><option v-for="locale in uiLocales" :key="locale.code" :value="locale.code">{{ locale.name }}</option></select></label></div></header>
+      <header class="topbar"><span class="breadcrumb">{{ $t('工作空间') }} <span class="crumb">/</span> {{ $t('直播弹幕') }}</span><div class="topbar-tools"><span class="version">v0.5.0 · MULTILINGUAL</span><label class="ui-language" for="ui-language">Language<select id="ui-language" v-model="uiLocale" aria-label="Language"><option v-for="locale in uiLocales" :key="locale.code" :value="locale.code">{{ locale.name }}</option></select></label></div></header>
       <div class="page-title"><div><div class="eyebrow">{{ $t('CONNECT WITHOUT LANGUAGE BARRIERS') }}</div><h1>{{ $t('让每一句话，都被听懂') }}<span>{{ $t('。') }}</span></h1><p>{{ $t('将 YouTube 直播弹幕带入 OBS，让每一种语言都有位置。') }}</p></div><button class="secondary" :disabled="busy" @click="action('demo', true)">▷ {{ $t('体验演示') }}</button></div>
       <div class="toast" role="status" v-if="notice">{{ $uiMessage(notice) }}</div>
       <div class="columns">

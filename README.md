@@ -2,15 +2,15 @@
 
 免费抓取公开 YouTube 直播弹幕，使用 Google Translate 免 Key 网页接口翻译为多种语言，按自定义顺序显示在透明 OBS 浏览器源中。支持频道自定义表情、图片表情与贴纸。
 
-**v0.4.0** 仅保留免费抓取和 Google Translate，不再提供官方 YouTube API、Azure 或相关密钥/模式设置。Windows 下载见 [v0.4.0 Release](https://github.com/Miaowu-Mecci/Youtube-Chat-With-Translate/releases/tag/v0.4.0)，同时提供 EXE、含说明和许可证的 ZIP，以及 SHA-256 校验文件。旧版本 EXE 不包含本页所述的全部最新改动。
+**v0.5.0** 新增中文、日语和英语界面，继续使用免费抓取和免 Key 的 Google Translate。Windows 下载见 [v0.5.0 Release](https://github.com/Miaowu-Mecci/Youtube-Chat-With-Translate/releases/tag/v0.5.0)，同时提供 EXE、含说明和许可证的 ZIP，以及 SHA-256 校验文件。直接运行 EXE 无需安装 Python、Node.js 或 Git。
 
-## 界面语言（源码更新，尚未发布）
+## 界面语言
 
 主界面右上角的 **Language** 下拉框可切换「简体中文 / 日本語 / English」。按钮、设置说明、目标语言名称、状态、错误诊断、提示及无障碍标签均使用所选界面语言。界面词库随程序提供，不调用 Google 翻译界面，也不需要网络。
 
 首次打开按浏览器的首个受支持语言选择，无法匹配时使用中文；手动选择保存在当前浏览器中，刷新和再次打开后保留。禁用浏览器存储时仍可在当前页面切换。界面语言独立于弹幕翻译的目标语言，不修改直播配置、不发送翻译请求，也不改变原文和已完成译文。
 
-同一浏览器中同源的预览与已打开 overlay 会即时同步界面语言，不重载页面或重放弹幕。OBS 的浏览器源拥有独立存储，不与外部浏览器共享语言偏好。此功能目前在 `main` 源码中，现有 v0.4.0 EXE 尚未包含；只有用户明确要求时才发布新版本。
+同一浏览器中同源的预览与已打开 overlay 会即时同步界面语言，不重载页面或重放弹幕。OBS 的浏览器源拥有独立存储，不与外部浏览器共享语言偏好。界面语言切换从 v0.5.0 开始提供。
 
 ## 快速开始
 
